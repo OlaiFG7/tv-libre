@@ -216,9 +216,10 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
 
     private fun guardarMAC() {
         pedir("ssap://com.webos.service.connectionmanager/getinfo") { r ->
-            val mac = r?.optJSONObject("wiredInfo")?.optString("macAddress")?.takeIf { it.isNotEmpty() && it != "00:00:00:00:00:00" }
-                ?: r?.optJSONObject("wifiInfo")?.optString("macAddress")?.takeIf { it.isNotEmpty() }
-            if (mac != null) prefs.edit().putString("mac:$ip", mac).apply()
+            // Las dos: la TV da la MAC del cable aunque esté por Wi-Fi, y solo despierta con la de la tarjeta que usa
+            val macs = listOf("wiredInfo", "wifiInfo").mapNotNull { r?.optJSONObject(it)?.optString("macAddress") }
+                .filter { it.isNotEmpty() && it != "00:00:00:00:00:00" }.distinct()
+            if (macs.isNotEmpty()) prefs.edit().putString("mac:$ip", macs.joinToString(",")).apply()
         }
     }
 
@@ -229,15 +230,16 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
      * Cuando la TV contesta se abre TV Libre: una app de desarrollador no puede abrirse sola al encender.
      */
     fun encender() {
-        val mac = prefs.getString("mac:$ip", null) ?: return
-        val bytes = mac.split(":").mapNotNull { it.toIntOrNull(16)?.toByte() }
-        if (bytes.size != 6) return
-        val paquete = ByteArray(6) { 0xFF.toByte() } + (1..16).flatMap { bytes }.toByteArray()
+        val macs = prefs.getString("mac:$ip", null) ?: return
+        val paquetes = macs.split(",").map { mac -> mac.split(":").mapNotNull { it.toIntOrNull(16)?.toByte() } }
+            .filter { it.size == 6 }
+            .map { bytes -> ByteArray(6) { 0xFF.toByte() } + (1..16).flatMap { bytes }.toByteArray() }
+        if (paquetes.isEmpty()) return
         Thread {
             try {
                 DatagramSocket().use { s ->
                     s.broadcast = true
-                    for (destino in listOf("255.255.255.255", ip)) for (puerto in listOf(9, 7)) {
+                    for (paquete in paquetes) for (destino in listOf("255.255.255.255", ip)) for (puerto in listOf(9, 7)) {
                         s.send(DatagramPacket(paquete, paquete.size, InetAddress.getByName(destino), puerto))
                     }
                 }

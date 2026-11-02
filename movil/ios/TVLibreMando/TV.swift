@@ -252,9 +252,13 @@ final class TV: NSObject, ObservableObject {
 
     private func guardarMAC() async {
         guard let r = try? await pedir("ssap://com.webos.service.connectionmanager/getinfo") else { return }
-        let mac = ((r["wiredInfo"] as? [String: Any])?["macAddress"] as? String)
-            ?? ((r["wifiInfo"] as? [String: Any])?["macAddress"] as? String)
-        if let mac, mac != "00:00:00:00:00:00" { UserDefaults.standard.set(mac, forKey: "mac:\(ip)") }
+        // Las dos: la TV da la MAC del cable aunque esté por Wi-Fi, y solo despierta con la de la tarjeta que usa
+        var macs: [String] = []
+        for clave in ["wiredInfo", "wifiInfo"] {
+            if let mac = (r[clave] as? [String: Any])?["macAddress"] as? String, !mac.isEmpty,
+               mac != "00:00:00:00:00:00", !macs.contains(mac) { macs.append(mac) }
+        }
+        if !macs.isEmpty { UserDefaults.standard.set(macs.joined(separator: ","), forKey: "mac:\(ip)") }
     }
 
     var puedeEncender: Bool { UserDefaults.standard.string(forKey: "mac:\(ip)") != nil }
@@ -267,18 +271,20 @@ final class TV: NSObject, ObservableObject {
      * abrirse sola al encender.
      */
     func encender() {
-        guard let mac = UserDefaults.standard.string(forKey: "mac:\(ip)") else { return }
-        let bytes = mac.split(separator: ":").compactMap { UInt8($0, radix: 16) }
-        guard bytes.count == 6 else { return }
-        var paquete = Data(repeating: 0xFF, count: 6)
-        for _ in 0..<16 { paquete.append(contentsOf: bytes) }
-        let datos = paquete
-        for puerto: UInt16 in [9, 7] {
-            let c = NWConnection(host: NWEndpoint.Host(ip), port: NWEndpoint.Port(rawValue: puerto)!, using: .udp)
-            c.stateUpdateHandler = { estado in
-                if case .ready = estado { c.send(content: datos, completion: .contentProcessed { _ in c.cancel() }) }
+        guard let macs = UserDefaults.standard.string(forKey: "mac:\(ip)") else { return }
+        for mac in macs.split(separator: ",") {
+            let bytes = mac.split(separator: ":").compactMap { UInt8($0, radix: 16) }
+            guard bytes.count == 6 else { continue }
+            var paquete = Data(repeating: 0xFF, count: 6)
+            for _ in 0..<16 { paquete.append(contentsOf: bytes) }
+            let datos = paquete
+            for puerto: UInt16 in [9, 7] {
+                let c = NWConnection(host: NWEndpoint.Host(ip), port: NWEndpoint.Port(rawValue: puerto)!, using: .udp)
+                c.stateUpdateHandler = { estado in
+                    if case .ready = estado { c.send(content: datos, completion: .contentProcessed { _ in c.cancel() }) }
+                }
+                c.start(queue: .global())
             }
-            c.start(queue: .global())
         }
         // La TV tarda en arrancar: se reintenta hasta que conteste, y entonces se abre TV Libre
         Task {
