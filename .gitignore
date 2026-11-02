@@ -9,3 +9,5 @@ local.properties
 DerivedData/
 xcuserdata/
 *.apk
+# Enlace privado del calendario (tools/install.py --calendario=URL)
+app/calendario.txt

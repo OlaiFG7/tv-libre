@@ -5,6 +5,12 @@
     python3 tools/install.py 192.168.1.50 --desinstalar  # la quita
     python3 tools/install.py 192.168.1.50 --olvidar      # borra la clave y la huella guardadas de esa TV
     python3 tools/install.py 192.168.1.50 --rapido       # solo sube HTML, CSS y JS (para probar cambios)
+    python3 tools/install.py --rapido                    # sin IP: usa la TV ya emparejada, si solo hay una
+    python3 tools/install.py --calendario=URL            # guarda el enlace iCal privado de tu calendario e instala
+    python3 tools/install.py --calendario=               # lo quita
+
+Calendario: en Google Calendar, Configuración → tu calendario → "Dirección secreta en formato iCal".
+Se guarda en app/calendario.txt, que no entra en git (quien tenga el enlace ve tu calendario), y va en el paquete.
 
 Antes, en la TV: instala "Developer Mode" desde LG Content Store, entra con una cuenta gratuita de
 webostv.developer.lge.com, activa "Dev Mode Status" (la TV se reinicia) y luego "Key Server".
@@ -217,8 +223,51 @@ def desinstalar(ip, clave):
         sys.exit('No se confirmó: %s' % json.dumps(respuestas[-1:], ensure_ascii=False))
 
 
+OPCIONES = ('--desinstalar', '--olvidar', '--rapido')
+
+
+def tv_emparejada():
+    """La IP de la única TV con clave guardada, para no tener que escribirla cada vez (None si hay 0 o varias)."""
+    carpeta = os.path.join(os.path.expanduser('~'), '.ssh')
+    try:
+        nombres = os.listdir(carpeta)
+    except OSError:
+        return None
+    ips = [n[len('tvlibre_'):].replace('_', '.') for n in nombres
+           if re.match(r'^tvlibre_\d{1,3}(_\d{1,3}){3}$', n)]
+    return ips[0] if len(ips) == 1 else None
+
+
+def guardar_calendario(valor):
+    ruta = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app', 'calendario.txt')
+    valor = valor.strip()
+    if valor.startswith('webcal://'):
+        valor = 'https://' + valor[len('webcal://'):]
+    if not valor:
+        if os.path.exists(ruta):
+            os.remove(ruta)
+        print('Calendario quitado.')
+        return
+    if not re.match(r'^https://\S+$', valor):
+        sys.exit('El enlace del calendario tiene que empezar por https:// (la "dirección secreta en formato iCal").')
+    with open(ruta, 'w', encoding='utf-8') as f:
+        f.write(valor + '\n')
+    os.chmod(ruta, 0o600)
+    print('Calendario guardado en app/calendario.txt (fuera de git).')
+
+
 def main():
+    calendario = [a for a in sys.argv[1:] if a.startswith('--calendario=')]
+    if calendario:
+        guardar_calendario(calendario[-1].split('=', 1)[1])
+    desconocidas = [a for a in sys.argv[1:] if a.startswith('--') and a not in OPCIONES and not a.startswith('--calendario=')]
+    if desconocidas:
+        # Mejor parar que hacer una instalación completa por una errata en --rapido
+        sys.exit('Opción desconocida: %s\n%s' % (' '.join(desconocidas), __doc__))
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    if not args and tv_emparejada():
+        args = [tv_emparejada()]
+        print('TV emparejada:', args[0])
     if len(args) != 1 or not re.match(r'^\d{1,3}(\.\d{1,3}){3}$', args[0]):
         sys.exit(__doc__)
     ip = args[0]

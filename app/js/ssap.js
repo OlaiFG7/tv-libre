@@ -16,6 +16,8 @@ var Ssap = (function () {
       var siguiente = 0, pendientes = {};
       var corte = setTimeout(function () { ws.close(); mal(new Error('SSAP sin respuesta')); }, espera || 20000);
       ws.onerror = function () { clearTimeout(corte); mal(new Error('SSAP no disponible')); };
+      // Si la TV cierra sin error, se rinde ya en vez de esperar los 20 s (no hace nada si ya se emparejó)
+      ws.onclose = function () { clearTimeout(corte); mal(new Error('SSAP cerrado')); };
       ws.onopen = function () {
         var registro = JSON.parse(JSON.stringify(REGISTRO));
         try { var clave = localStorage.getItem('ssap:clave'); if (clave) registro['client-key'] = clave; } catch (e) {}
@@ -27,13 +29,20 @@ var Ssap = (function () {
           if (r.type === 'registered') {
             clearTimeout(corte);
             try { localStorage.setItem('ssap:clave', r.payload['client-key']); } catch (e) {}
-            ok(function pedir(uri, payload) {
+            var pedir = function (uri, payload) {
               return new Promise(function (bien, error) {
                 var id = 'p' + (++siguiente);
-                pendientes[id] = [bien, error];
+                // Sin respuesta en 10 s se rinde: si no, cargar las apps se quedaría esperando para siempre
+                var plazo = setTimeout(function () { delete pendientes[id]; error(new Error('Sin respuesta de ' + uri)); }, 10000);
+                pendientes[id] = [
+                  function (x) { clearTimeout(plazo); bien(x); },
+                  function (x) { clearTimeout(plazo); error(x); }
+                ];
                 ws.send(JSON.stringify({ type: 'request', id: id, uri: uri, payload: payload || {} }));
               });
-            });
+            };
+            pedir.cerrar = function () { ws.close(); };
+            ok(pedir);
           } else if (r.type === 'error') {
             clearTimeout(corte); ws.close(); mal(new Error(r.error || 'Emparejamiento rechazado'));
           }
@@ -47,12 +56,34 @@ var Ssap = (function () {
     });
   }
 
-  /** Apps instaladas por SSAP, con el mismo formato que listLaunchPoints. */
+  /**
+   * Apps instaladas por SSAP, con el mismo formato que listLaunchPoints.
+   * La conexión se cierra al terminar: se llama en cada relanzamiento y no debe quedar ningún socket abierto.
+   */
   function apps() {
     return conectar().then(function (pedir) {
-      return pedir('ssap://com.webos.applicationManager/listLaunchPoints');
-    }).then(function (r) { return r.launchPoints || []; });
+      return pedir('ssap://com.webos.applicationManager/listLaunchPoints').then(function (r) {
+        pedir.cerrar();
+        return r.launchPoints || [];
+      }, function (e) {
+        pedir.cerrar();
+        throw e;
+      });
+    });
   }
 
-  return { conectar: conectar, apps: apps };
+  /** Entradas externas (HDMI…) por SSAP: [{id, label, appId, connected}]. */
+  function entradas() {
+    return conectar().then(function (pedir) {
+      return pedir('ssap://tv/getExternalInputList').then(function (r) {
+        pedir.cerrar();
+        return r.devices || [];
+      }, function (e) {
+        pedir.cerrar();
+        throw e;
+      });
+    });
+  }
+
+  return { conectar: conectar, apps: apps, entradas: entradas };
 })();

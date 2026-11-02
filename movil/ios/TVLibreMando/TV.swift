@@ -215,6 +215,14 @@ final class TV: NSObject, ObservableObject {
     func borrar(_ n: Int) { Task { try? await pedir("ssap://com.webos.service.ime/deleteCharacters", ["count": n]) } }
     func intro() { Task { try? await pedir("ssap://com.webos.service.ime/sendEnterKey") } }
 
+    /// Abre YouTube directamente en su búsqueda (contentTarget acepta una dirección de youtube.com/tv).
+    func buscarEnYouTube(_ texto: String) {
+        var permitidos = CharacterSet.urlQueryAllowed
+        permitidos.remove(charactersIn: "&=+#?")
+        let q = texto.addingPercentEncoding(withAllowedCharacters: permitidos) ?? texto
+        abrir("youtube.leanback.v4", parametros: ["contentTarget": "https://www.youtube.com/tv#/search?q=" + q])
+    }
+
     /** El botón Home del móvil abre TV Libre, no el inicio de LG con anuncios. */
     func inicio() { abrir(ID_TV_LIBRE) }
     func fondo(_ id: String) { abrir(ID_TV_LIBRE, parametros: ["fondo": id]) }

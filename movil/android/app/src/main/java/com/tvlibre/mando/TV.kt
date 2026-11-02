@@ -175,6 +175,10 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
     fun borrar(n: Int) = pedir("ssap://com.webos.service.ime/deleteCharacters", JSONObject().put("count", n))
     fun intro() = pedir("ssap://com.webos.service.ime/sendEnterKey")
 
+    /** Abre YouTube directamente en su búsqueda (contentTarget acepta una dirección de youtube.com/tv). */
+    fun buscarEnYouTube(texto: String) = abrir("youtube.leanback.v4", JSONObject().put("contentTarget",
+        "https://www.youtube.com/tv#/search?q=" + java.net.URLEncoder.encode(texto, "UTF-8").replace("+", "%20")))
+
     /** El botón Home del móvil abre TV Libre, no el inicio de LG con anuncios. */
     fun inicio() = abrir(ID_TV_LIBRE)
     fun fondo(id: String) = abrir(ID_TV_LIBRE, JSONObject().put("fondo", id))

@@ -8,6 +8,9 @@
  *                     el relleno del reloj y la transición. La TV no calcula ningún difuminado.
  *   <id>-frente.webp  el primer plano con el cielo transparente (tools/profundidad.py), dibujado
  *                     encima del reloj para que las cumbres o los edificios lo tapen
+ *   <id>-noche*.      lo mismo de noche, para el modo oscuro (tools/noche.py); las marcadas con
+ *                     nocturna: true ya son de noche y no lo tienen
+ *   <id>-dia*.        al revés: la versión de día de una nocturna, para el modo claro (dia: true)
  *
  * Capas, de abajo arriba: #foto, #borroso-a/#borroso-b (las copias difuminadas), velo, reloj, #frente, interfaz.
  * Solo hay UNA capa de foto: la nueva se pone mientras la tapa la copia difuminada, así que nunca hay dos
@@ -32,25 +35,25 @@ var Fondos = (function () {
       claro: 'radial-gradient(ellipse at 80% 20%, #d3eadb 0%, rgba(211,234,219,0) 55%), linear-gradient(200deg, #eef3ef 0%, #d9e3dc 100%)' } },
 
     { id: 'montanas-amanecer', nombre: 'Amanecer sobre las nubes', grupo: 'Montañas', foto: '1506905925346-21bda4d32df4', profundidad: true, relojY: 30 },
-    { id: 'montanas-estrellas', nombre: 'Noche estrellada', grupo: 'Montañas', foto: '1519681393784-d120267933ba' },
+    { id: 'montanas-estrellas', nombre: 'Noche estrellada', grupo: 'Montañas', foto: '1519681393784-d120267933ba', nocturna: true },
     { id: 'montanas-valle', nombre: 'Valle alpino', grupo: 'Montañas', foto: '1464822759023-fed622ff2c3b' },
     { id: 'montanas-cumbre', nombre: 'Cumbre nevada', grupo: 'Montañas', foto: '1483728642387-6c3bdd6c93e5', profundidad: true, relojY: 100 },
     { id: 'montanas-himalaya', nombre: 'Himalaya', grupo: 'Montañas', foto: '1454496522488-7a8e488e8606' },
     { id: 'montanas-sierra', nombre: 'Sierra y pradera', grupo: 'Montañas', foto: '1486870591958-9b9d0d1dda99', profundidad: true },
     { id: 'lago-muelle', nombre: 'Muelle en el lago', grupo: 'Lagos', foto: '1439066615861-d1af74d74000' },
-    { id: 'montanas-rojas', nombre: 'Picos rojos', grupo: 'Montañas', foto: '1477346611705-65d1883cee1e', profundidad: true },
+    { id: 'montanas-rojas', nombre: 'Picos rojos', grupo: 'Montañas', foto: '1477346611705-65d1883cee1e', profundidad: true, nocturna: true, dia: true },
     { id: 'playa-atardecer', nombre: 'Playa al atardecer', grupo: 'Playas', foto: '1507525428034-b723cf961d3e' },
     { id: 'playa-tropical', nombre: 'Playa tropical', grupo: 'Playas', foto: '1519046904884-53103b34b206' },
     { id: 'playa-aerea', nombre: 'Costa desde el aire', grupo: 'Playas', foto: '1505228395891-9a51e7e86bf6' },
     { id: 'playa-amanecer', nombre: 'Amanecer en la orilla', grupo: 'Playas', foto: '1473116763249-2faaef81ccda' },
     { id: 'playa-costa', nombre: 'Costa al anochecer', grupo: 'Playas', foto: '1475924156734-496f6cac6ec1' },
     { id: 'ciudad-nueva-york', nombre: 'Nueva York', grupo: 'Ciudades', foto: '1514565131-fce0801e5785', profundidad: true },
-    { id: 'ciudad-tokio', nombre: 'Tokio de noche', grupo: 'Ciudades', foto: '1540959733332-eab4deabeeaf' },
+    { id: 'ciudad-tokio', nombre: 'Tokio de noche', grupo: 'Ciudades', foto: '1540959733332-eab4deabeeaf', nocturna: true },
     { id: 'ciudad-paris', nombre: 'París', grupo: 'Ciudades', foto: '1502602898657-3e91760cbb34' },
     { id: 'ciudad-san-francisco', nombre: 'San Francisco', grupo: 'Ciudades', foto: '1501594907352-04cda38ebc29' },
     { id: 'ciudad-chicago', nombre: 'Chicago', grupo: 'Ciudades', foto: '1477959858617-67f85cf4f1df' },
     { id: 'ciudad-dubai', nombre: 'Dubái', grupo: 'Ciudades', foto: '1512453979798-5ea266f8880c', profundidad: true },
-    { id: 'ciudad-hong-kong', nombre: 'Hong Kong', grupo: 'Ciudades', foto: '1536599018102-9f803c140fc1' },
+    { id: 'ciudad-hong-kong', nombre: 'Hong Kong', grupo: 'Ciudades', foto: '1536599018102-9f803c140fc1', nocturna: true },
     { id: 'ciudad-londres', nombre: 'Londres', grupo: 'Ciudades', foto: '1513635269975-59663e0ac1ad' },
     { id: 'ciudad-manhattan', nombre: 'Manhattan', grupo: 'Ciudades', foto: '1534430480872-3498386e7856', profundidad: true },
     { id: 'lago-braies', nombre: 'Lago de Braies', grupo: 'Lagos', foto: '1470770841072-f978cf4d019e' },
@@ -59,7 +62,7 @@ var Fondos = (function () {
     { id: 'naturaleza-colinas', nombre: 'Colinas en capas', grupo: 'Naturaleza', foto: '1500534314209-a25ddb2bd429' },
     { id: 'naturaleza-bosque', nombre: 'Bosque', grupo: 'Naturaleza', foto: '1441974231531-c6227db76b6e' },
     { id: 'naturaleza-desierto', nombre: 'Desierto', grupo: 'Naturaleza', foto: '1509316785289-025f5b846b35', profundidad: true, relojY: 50 },
-    { id: 'naturaleza-aurora', nombre: 'Aurora boreal', grupo: 'Naturaleza', foto: '1531366936337-7c912a4589a7' },
+    { id: 'naturaleza-aurora', nombre: 'Aurora boreal', grupo: 'Naturaleza', foto: '1531366936337-7c912a4589a7', nocturna: true },
     { id: 'naturaleza-niebla', nombre: 'Colinas con niebla', grupo: 'Naturaleza', foto: '1470071459604-3b5ec3a7fe05' },
     { id: 'naturaleza-valle', nombre: 'Valle verde', grupo: 'Naturaleza', foto: '1472214103451-9374bd1c798e' },
     { id: 'naturaleza-yosemite', nombre: 'Yosemite', grupo: 'Naturaleza', foto: '1506744038136-46273834b3fb', profundidad: true },
@@ -83,10 +86,13 @@ var Fondos = (function () {
     return LISTA[(i + paso + LISTA.length) % LISTA.length];
   }
 
-  /** El siguiente para la rotación automática: del mismo grupo, o la siguiente foto de todas. */
+  /**
+   * El siguiente para la rotación automática: del mismo grupo, o la siguiente foto de todas.
+   * Con un fondo minimalista se rota entre los minimalistas: no se cambia a una foto quien eligió un degradado.
+   */
   function siguienteRotacion(id, soloGrupo) {
     var actual = buscar(id);
-    var lista = LISTA.filter(function (f) { return soloGrupo ? f.grupo === actual.grupo : !f.minimal; });
+    var lista = LISTA.filter(function (f) { return soloGrupo || actual.minimal ? f.grupo === actual.grupo : !f.minimal; });
     var i = lista.indexOf(actual);
     return lista[(i + 1) % lista.length];
   }
@@ -105,11 +111,16 @@ var Fondos = (function () {
     });
   }
 
-  function url(f, tipo) {
-    var clave = f.id + ':' + tipo;
-    if (clave in resueltas) return Promise.resolve(resueltas[clave]);
-    var local = 'fondos/' + f.id + (tipo === 'foto' ? '.jpg' : tipo === 'vidrio' ? '-vidrio.jpg' : '-frente.webp');
+  // variante: '' (la foto tal cual), 'noche' o 'dia' (ver tools/noche.py)
+  function url(f, tipo, variante) {
+    var clave = f.id + ':' + tipo + ':' + (variante || '');
+    // Ya resuelta: se vuelve a decodificar igualmente (si el navegador la descartó, no se hace a mitad de la transición)
+    if (clave in resueltas) return resueltas[clave] ? cargar(resueltas[clave]) : Promise.resolve('');
+    var local = 'fondos/' + f.id + (variante ? '-' + variante : '') + (tipo === 'foto' ? '.jpg' : tipo === 'vidrio' ? '-vidrio.jpg' : '-frente.webp');
     var intento = cargar(local);
+    // Sin esa versión (no se generó con tools/noche.py), la foto tal cual
+    if (variante) return intento.catch(function () { return url(f, tipo, ''); })
+      .then(function (src) { resueltas[clave] = src; return src; });
     // El recorte solo existe en local; sin él, simplemente no hay profundidad
     intento = tipo === 'frente' ? intento.catch(function () { return ''; })
       : intento.catch(function () { return cargar(remota(f, tipo === 'vidrio')); });
@@ -117,11 +128,19 @@ var Fondos = (function () {
   }
 
   /** {fondo, vidrio, frente}: valores CSS de background-image ('' si no hay recorte). */
-  function css(f, tema, conFrente) {
+  /** Con cielo según el tema: de noche en oscuro; y las nocturnas que tienen versión de día, de día en claro. */
+  function variante(f, tema, cielo) {
+    if (!cielo || f.minimal) return '';
+    if (tema === 'oscuro') return f.nocturna ? '' : 'noche';
+    return f.dia ? 'dia' : '';
+  }
+
+  function css(f, tema, conFrente, cielo) {
     if (f.minimal) return Promise.resolve({ fondo: f.minimal[tema], vidrio: f.minimal[tema], frente: '' });
+    var v = variante(f, tema, cielo);
     return Promise.all([
-      url(f, 'foto'), url(f, 'vidrio'),
-      conFrente && f.profundidad ? url(f, 'frente') : Promise.resolve('')
+      url(f, 'foto', v), url(f, 'vidrio', v),
+      conFrente && f.profundidad ? url(f, 'frente', v) : Promise.resolve('')
     ]).then(function (r) {
       return { fondo: 'url("' + r[0] + '")', vidrio: 'url("' + r[1] + '")', frente: r[2] ? 'url("' + r[2] + '")' : '' };
     });
@@ -149,11 +168,11 @@ var Fondos = (function () {
   }
 
   /**
-   * Cambia al fondo f. opciones: {tema, frente (bool), animar (bool)}.
+   * Cambia al fondo f. opciones: {tema, frente (bool), cielo (bool: la foto de día o de noche según el tema), animar (bool)}.
    * Si llega otro cambio mientras se anima, se encola solo el último.
    */
   function aplicar(f, opciones) {
-    var pedido = f.id + ':' + opciones.tema + ':' + opciones.frente;
+    var pedido = f.id + ':' + opciones.tema + ':' + opciones.frente + ':' + variante(f, opciones.tema, opciones.cielo);
     // El cerrojo se pone ANTES de cargar la foto: si llegan dos pulsaciones mientras se decodifica,
     // la segunda espera su turno en vez de lanzar otra transición encima
     if (ocupado) { pendiente = [f, opciones]; return Promise.resolve(); }
@@ -161,7 +180,7 @@ var Fondos = (function () {
     ocupado = true;
     actual = pedido;
     var body = document.body;
-    return css(f, opciones.tema, opciones.frente).then(function (v) {
+    return css(f, opciones.tema, opciones.frente, opciones.cielo).then(function (v) {
       if (!vidrioActual || !opciones.animar) {
         // Primer fondo, o animaciones reducidas: cambio directo
         foto.style.backgroundImage = v.fondo;
@@ -215,6 +234,21 @@ var Fondos = (function () {
     });
   }
 
+  /**
+   * Suelta la foto, el recorte y el vidrio (unos 8 MB por imagen de 1920×1080 ya decodificada).
+   * Se llama al ocultarse la app: la TV tiene 1 GB y la memoria la necesita la app que se abre.
+   * El siguiente aplicar() vuelve a ponerlo todo, sin transición.
+   */
+  function soltar() {
+    if (ocupado) return;   // a mitad de una transición: no se toca
+    actual = '';
+    vidrioActual = '';
+    foto.style.backgroundImage = frente.style.backgroundImage = 'none';
+    borrosos[0].style.backgroundImage = borrosos[1].style.backgroundImage = 'none';
+    var vidrios = document.querySelectorAll('.vidrio-fondo');
+    for (var i = 0; i < vidrios.length; i++) vidrios[i].style.backgroundImage = 'none';
+  }
+
   function siguientePendiente() {
     ocupado = false;
     if (pendiente) { var p = pendiente; pendiente = null; aplicar(p[0], p[1]); }
@@ -238,16 +272,24 @@ var Fondos = (function () {
   }
 
   /** Posición en pantalla de un elemento, sin contar transform. */
+  // Lo que está dentro de una capa .desplazable se ve `subida` px más arriba (body.pagina-2)
+  var subida = 0;
   function posicion(el) {
     var x = 0, y = 0;
-    while (el) { x += el.offsetLeft; y += el.offsetTop; el = el.offsetParent; }
+    while (el) {
+      x += el.offsetLeft; y += el.offsetTop;
+      if (el.classList && el.classList.contains('desplazable')) y -= subida;
+      el = el.offsetParent;
+    }
     return { x: x, y: y };
   }
 
   return {
     LISTA: LISTA, buscar: buscar, siguiente: siguiente, siguienteRotacion: siguienteRotacion,
-    iniciar: iniciar, aplicar: aplicar, colocarVidrio: colocarVidrio, posicion: posicion,
+    iniciar: iniciar, aplicar: aplicar, soltar: soltar, colocarVidrio: colocarVidrio, posicion: posicion,
     vidrio: function () { return vidrioActual; },
+    /** Cuánto está subida la pantalla, para recortar el vidrio en su sitio. */
+    subir: function (px) { subida = px; },
     /** fn(vidrio) cuando cambia la copia difuminada; mitad(f) en el momento oculto de la transición */
     al: function (evento, fn) { oyentes[evento] = fn; }
   };

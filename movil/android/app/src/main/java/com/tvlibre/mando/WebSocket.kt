@@ -50,7 +50,8 @@ class WebSocket(
             Socket()
         }
         s.connect(InetSocketAddress(url.host, puerto), 5000)
-        s.soTimeout = 0
+        // Con tiempo límite hasta tener el 101: si algo acepta TCP y calla, no bloquea el hilo de red para siempre
+        s.soTimeout = 5000
         if (s is SSLSocket) s.startHandshake()
         socket = s
         val out = BufferedOutputStream(s.getOutputStream())
@@ -66,6 +67,7 @@ class WebSocket(
         val estado = leerLinea(entrada)
         if (!estado.contains(" 101")) throw IOException("La TV respondió: $estado")
         while (leerLinea(entrada).isNotEmpty()) { /* cabeceras */ }
+        s.soTimeout = 0
         abierto = true
         Thread({ leer(entrada) }, "ws-${url.port}").apply { isDaemon = true }.start()
     }

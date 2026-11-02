@@ -254,7 +254,15 @@ struct Teclado: View {
                     ultimo = nuevo
                 }
                 .onSubmit { tv.intro(); texto = ""; ultimo = "" }
-            Text("Intro en el teclado envía la búsqueda.").font(.footnote).foregroundStyle(.secondary)
+            HStack {
+                Text("Intro en el teclado envía la búsqueda.").font(.footnote).foregroundStyle(.secondary)
+                Spacer()
+                Button("Buscar en YouTube") {
+                    let q = texto.trimmingCharacters(in: .whitespaces)
+                    if !q.isEmpty { tv.buscarEnYouTube(q) }
+                }
+                .disabled(texto.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
         }
         .padding(24)
         .onAppear { foco = true }

@@ -250,7 +250,12 @@ class Principal : Activity() {
         }
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle("Escribir en la TV").setView(FrameLayout(this).apply { setPadding(20.dp, 8.dp, 20.dp, 0); addView(campo) })
-            .setPositiveButton("Cerrar", null).show()
+            .setPositiveButton("Cerrar", null)
+            .setNeutralButton("Buscar en YouTube") { _, _ ->
+                val q = campo.text.toString().trim()
+                if (q.isNotEmpty()) tv.buscarEnYouTube(q)
+            }
+            .show()
         campo.requestFocus()
     }
 
