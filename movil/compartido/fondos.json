@@ -1,0 +1,245 @@
+[
+ {
+  "id": "grafito",
+  "nombre": "Grafito",
+  "grupo": "Minimalista",
+  "colores": [
+   "#3b3f4a",
+   "#1c1e24"
+  ]
+ },
+ {
+  "id": "aurora",
+  "nombre": "Aurora",
+  "grupo": "Minimalista",
+  "colores": [
+   "#4a2fb0",
+   "#0e7aa0"
+  ]
+ },
+ {
+  "id": "oceano",
+  "nombre": "Océano",
+  "grupo": "Minimalista",
+  "colores": [
+   "#1b5d8c",
+   "#0b2238"
+  ]
+ },
+ {
+  "id": "atardecer",
+  "nombre": "Atardecer",
+  "grupo": "Minimalista",
+  "colores": [
+   "#c2563a",
+   "#4a2a5e"
+  ]
+ },
+ {
+  "id": "salvia",
+  "nombre": "Salvia",
+  "grupo": "Minimalista",
+  "colores": [
+   "#2f5a48",
+   "#14201b"
+  ]
+ },
+ {
+  "id": "montanas-amanecer",
+  "nombre": "Amanecer sobre las nubes",
+  "grupo": "Montañas",
+  "miniatura": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "montanas-estrellas",
+  "nombre": "Noche estrellada",
+  "grupo": "Montañas",
+  "miniatura": "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "montanas-valle",
+  "nombre": "Valle alpino",
+  "grupo": "Montañas",
+  "miniatura": "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "montanas-cumbre",
+  "nombre": "Cumbre nevada",
+  "grupo": "Montañas",
+  "miniatura": "https://images.unsplash.com/photo-1483728642387-6c3bdd6c93e5?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "montanas-himalaya",
+  "nombre": "Himalaya",
+  "grupo": "Montañas",
+  "miniatura": "https://images.unsplash.com/photo-1454496522488-7a8e488e8606?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "montanas-sierra",
+  "nombre": "Sierra y pradera",
+  "grupo": "Montañas",
+  "miniatura": "https://images.unsplash.com/photo-1486870591958-9b9d0d1dda99?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "lago-muelle",
+  "nombre": "Muelle en el lago",
+  "grupo": "Lagos",
+  "miniatura": "https://images.unsplash.com/photo-1439066615861-d1af74d74000?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "montanas-rojas",
+  "nombre": "Picos rojos",
+  "grupo": "Montañas",
+  "miniatura": "https://images.unsplash.com/photo-1477346611705-65d1883cee1e?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "playa-atardecer",
+  "nombre": "Playa al atardecer",
+  "grupo": "Playas",
+  "miniatura": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "playa-tropical",
+  "nombre": "Playa tropical",
+  "grupo": "Playas",
+  "miniatura": "https://images.unsplash.com/photo-1519046904884-53103b34b206?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "playa-aerea",
+  "nombre": "Costa desde el aire",
+  "grupo": "Playas",
+  "miniatura": "https://images.unsplash.com/photo-1505228395891-9a51e7e86bf6?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "playa-amanecer",
+  "nombre": "Amanecer en la orilla",
+  "grupo": "Playas",
+  "miniatura": "https://images.unsplash.com/photo-1473116763249-2faaef81ccda?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "playa-costa",
+  "nombre": "Costa al anochecer",
+  "grupo": "Playas",
+  "miniatura": "https://images.unsplash.com/photo-1475924156734-496f6cac6ec1?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "ciudad-nueva-york",
+  "nombre": "Nueva York",
+  "grupo": "Ciudades",
+  "miniatura": "https://images.unsplash.com/photo-1514565131-fce0801e5785?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "ciudad-tokio",
+  "nombre": "Tokio de noche",
+  "grupo": "Ciudades",
+  "miniatura": "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "ciudad-paris",
+  "nombre": "París",
+  "grupo": "Ciudades",
+  "miniatura": "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "ciudad-san-francisco",
+  "nombre": "San Francisco",
+  "grupo": "Ciudades",
+  "miniatura": "https://images.unsplash.com/photo-1501594907352-04cda38ebc29?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "ciudad-chicago",
+  "nombre": "Chicago",
+  "grupo": "Ciudades",
+  "miniatura": "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "ciudad-dubai",
+  "nombre": "Dubái",
+  "grupo": "Ciudades",
+  "miniatura": "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "ciudad-hong-kong",
+  "nombre": "Hong Kong",
+  "grupo": "Ciudades",
+  "miniatura": "https://images.unsplash.com/photo-1536599018102-9f803c140fc1?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "ciudad-londres",
+  "nombre": "Londres",
+  "grupo": "Ciudades",
+  "miniatura": "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "ciudad-manhattan",
+  "nombre": "Manhattan",
+  "grupo": "Ciudades",
+  "miniatura": "https://images.unsplash.com/photo-1534430480872-3498386e7856?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "lago-braies",
+  "nombre": "Lago de Braies",
+  "grupo": "Lagos",
+  "miniatura": "https://images.unsplash.com/photo-1470770841072-f978cf4d019e?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "lago-turquesa",
+  "nombre": "Lago turquesa",
+  "grupo": "Lagos",
+  "miniatura": "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "lago-wanaka",
+  "nombre": "Árbol en el lago",
+  "grupo": "Lagos",
+  "miniatura": "https://images.unsplash.com/photo-1494500764479-0c8f2919a3d8?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "naturaleza-colinas",
+  "nombre": "Colinas en capas",
+  "grupo": "Naturaleza",
+  "miniatura": "https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "naturaleza-bosque",
+  "nombre": "Bosque",
+  "grupo": "Naturaleza",
+  "miniatura": "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "naturaleza-desierto",
+  "nombre": "Desierto",
+  "grupo": "Naturaleza",
+  "miniatura": "https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "naturaleza-aurora",
+  "nombre": "Aurora boreal",
+  "grupo": "Naturaleza",
+  "miniatura": "https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "naturaleza-niebla",
+  "nombre": "Colinas con niebla",
+  "grupo": "Naturaleza",
+  "miniatura": "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "naturaleza-valle",
+  "nombre": "Valle verde",
+  "grupo": "Naturaleza",
+  "miniatura": "https://images.unsplash.com/photo-1472214103451-9374bd1c798e?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "naturaleza-yosemite",
+  "nombre": "Yosemite",
+  "grupo": "Naturaleza",
+  "miniatura": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ },
+ {
+  "id": "montanas-reflejo",
+  "nombre": "Reflejo al amanecer",
+  "grupo": "Montañas",
+  "miniatura": "https://images.unsplash.com/photo-1464278533981-50106e6176b1?w=320&h=180&fit=crop&crop=entropy&q=60&fm=jpg"
+ }
+]

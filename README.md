@@ -18,6 +18,8 @@ Pensada para la LG **UN711C0ZB** (webOS 5.0, firmware 04.64.00). Debería funcio
 - **Atenuado** para ver en una habitación a oscuras.
 - **Seguro.** Sin root. No toca el sistema: el inicio de LG sigue donde estaba, y una orden lo desinstala.
 
+**En el móvil:** [apps de mando para Android e iPhone](movil/README.md) con trackpad, teclado, apps, cambio de fondo y un botón Home que abre TV Libre (y no el inicio de LG).
+
 Además: [guía de ajustes](docs/AJUSTES-TV.md) para quitar publicidad y procesos de fondo desde los menús de la TV, y una [lista DNS](dns/bloqueo-lg.txt) para Pi-hole o AdGuard Home.
 
 ## Instalar
