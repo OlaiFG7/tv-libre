@@ -20,6 +20,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextUtils
 import android.text.TextWatcher
+import android.text.method.DigitsKeyListener
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -675,6 +676,7 @@ class Principal : Activity() {
         val cuerpo = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val (marco, campo) = campoTexto("IP de la TV, p. ej. 192.168.1.50", R.drawable.ic_tv)
         campo.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        campo.keyListener = DigitsKeyListener.getInstance("0123456789.")   // el teclado decimal solo deja poner un punto
         campo.setText(tv.ip)
         cuerpo.addView(marco, LinearLayout.LayoutParams(-1, 56.dp))
 
