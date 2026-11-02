@@ -14,16 +14,27 @@ import Network
  * su huella SHA-256 y después solo se acepta ese (como la huella SSH en tools/install.py).
  */
 
-struct AppTV: Identifiable, Hashable {
+/** id: el de TV Libre (la app, o el acceso fijado); se abre con appId y params. */
+struct AppTV: Identifiable {
     let id: String
     let nombre: String
     let icono: URL?
     let color: String?
+    var appId: String
+    var params: [String: Any]? = nil
 }
 
 struct EntradaTV: Identifiable, Hashable {
     let id: String
     let nombre: String
+    var appId: String = ""
+}
+
+/** Cómo tiene las apps la pantalla de TV Libre (lo manda la TV, ver avisarMovil en app/js/app.js). */
+struct Disposicion: Codable, Equatable {
+    var favoritas: [String] = []
+    var ocultas: [String] = []
+    var orden: [String] = []
 }
 
 struct Fondo: Identifiable, Decodable, Hashable {
@@ -47,6 +58,9 @@ enum ErrorTV: LocalizedError {
 }
 
 let ID_TV_LIBRE = "com.tvlibre.inicio"
+let PUERTO_MOVIL: UInt16 = 8765
+// Las mismas que TV Libre oculta de fábrica mientras no se sepa cómo las tiene
+let OCULTAS_DE_FABRICA = ["com.webos.", "com.palm.", "com.lge."]
 
 @MainActor
 final class TV: NSObject, ObservableObject {
@@ -60,6 +74,9 @@ final class TV: NSObject, ObservableObject {
     @Published var entradas: [EntradaTV] = []
     @Published var encontradas: [String] = []
     @Published var buscando = false
+    @Published var disposicion: Disposicion?
+    /** La app que se ve ahora en la TV (su appId), al día gracias a una suscripción. */
+    @Published var ahora: String?
 
     private var sesion: URLSession!
     private var ordenes: URLSessionWebSocketTask?
@@ -67,6 +84,8 @@ final class TV: NSObject, ObservableObject {
     private var pendientes: [String: CheckedContinuation<[String: Any], Error>] = [:]
     private var siguiente = 0
     private var registro: CheckedContinuation<Void, Error>?
+    private var suscripciones: [String: ([String: Any]) -> Void] = [:]
+    private var oyente: NWListener?
 
     override init() {
         super.init()
@@ -80,6 +99,7 @@ final class TV: NSObject, ObservableObject {
         guard !ip.isEmpty else { estado = .sinTV; return }
         desconectar()
         estado = .conectando
+        disposicion = UserDefaults.standard.data(forKey: "disposicion:\(ip)").flatMap { try? JSONDecoder().decode(Disposicion.self, from: $0) }
         guard let url = URL(string: "wss://\(ip):3001") else { estado = .error("IP no válida"); return }
         let tarea = sesion.webSocketTask(with: url)
         ordenes = tarea
@@ -94,9 +114,16 @@ final class TV: NSObject, ObservableObject {
             }
             estado = .conectada
             UserDefaults.standard.set(ip, forKey: "ip")
+            escuchar()
             await abrirBotones()
+            suscribir("ssap://com.webos.applicationManager/getForegroundAppInfo") { [weak self] r in
+                guard let self, let app = r["appId"] as? String, !app.isEmpty, app != self.ahora else { return }
+                self.ahora = app
+                if app == ID_TV_LIBRE && self.disposicion == nil { self.pedirDisposicion() }
+            }
             await cargarListas()
             await guardarMAC()
+            pedirDisposicion()
         } catch {
             estado = .error(error.localizedDescription)
         }
@@ -109,12 +136,16 @@ final class TV: NSObject, ObservableObject {
         botones = nil
         for (_, c) in pendientes { c.resume(throwing: ErrorTV.sinConexion) }
         pendientes = [:]
+        suscripciones = [:]
+        ahora = nil
+        oyente?.cancel()
+        oyente = nil
     }
 
     /** Borra la clave y la huella guardadas de esta TV: la próxima vez se vuelve a emparejar. */
     func olvidar() {
         desconectar()
-        for prefijo in ["clave:", "huella:", "mac:"] { UserDefaults.standard.removeObject(forKey: prefijo + ip) }
+        for prefijo in ["clave:", "huella:", "mac:", "disposicion:"] { UserDefaults.standard.removeObject(forKey: prefijo + ip) }
         UserDefaults.standard.removeObject(forKey: "ip")
         ip = ""
         apps = []
@@ -165,6 +196,7 @@ final class TV: NSObject, ObservableObject {
             }
             return
         }
+        if let s = suscripciones[id] { if tipo != "error" { s(carga) }; return }
         guard let c = pendientes.removeValue(forKey: id) else { return }
         if tipo == "error" || carga["returnValue"] as? Bool == false {
             c.resume(throwing: ErrorTV.respuesta(r["error"] as? String ?? carga["errorText"] as? String ?? "Error"))
@@ -182,6 +214,15 @@ final class TV: NSObject, ObservableObject {
             pendientes[id] = c
             enviar(["type": "request", "id": id, "uri": uri, "payload": carga])
         }
+    }
+
+    /** Como pedir(), pero la TV sigue avisando cada vez que cambia. */
+    private func suscribir(_ uri: String, _ alCambiar: @escaping ([String: Any]) -> Void) {
+        guard ordenes != nil else { return }
+        siguiente += 1
+        let id = "s\(siguiente)"
+        suscripciones[id] = alCambiar
+        enviar(["type": "subscribe", "id": id, "uri": uri, "payload": [String: Any]()])
     }
 
     // MARK: - Botones
@@ -224,26 +265,137 @@ final class TV: NSObject, ObservableObject {
     }
 
     /** El botón Home del móvil abre TV Libre, no el inicio de LG con anuncios. */
-    func inicio() { abrir(ID_TV_LIBRE) }
-    func fondo(_ id: String) { abrir(ID_TV_LIBRE, parametros: ["fondo": id]) }
-    func tema(_ tema: String) { abrir(ID_TV_LIBRE, parametros: ["tema": tema]) }
+    func inicio() { abrir(ID_TV_LIBRE, parametros: conMovil([:])) }
+    func fondo(_ id: String) { abrir(ID_TV_LIBRE, parametros: conMovil(["fondo": id])) }
+    func tema(_ tema: String) { abrir(ID_TV_LIBRE, parametros: conMovil(["tema": tema])) }
+    func abrir(_ app: AppTV) { abrir(app.appId, parametros: app.params) }
+
+    /** Mantener OK: en TV Libre coge la app para moverla (el socket de botones solo sabe pulsar y soltar). */
+    func mantenerOk() {
+        if ahora == ID_TV_LIBRE { abrir(ID_TV_LIBRE, parametros: ["mantenerOk": true]) } else { boton("ENTER") }
+    }
+
+    /** Nombre e icono de lo que se ve ahora en la TV, para la cabecera. */
+    var queSeVe: (nombre: String, icono: URL?)? {
+        guard let app = ahora else { return nil }
+        if app == ID_TV_LIBRE { return ("TV Libre", nil) }
+        if app == "com.webos.app.livetv" { return ("TV", nil) }
+        if let e = entradas.first(where: { $0.appId == app }) { return (e.nombre, nil) }
+        if let a = apps.first(where: { $0.appId == app && $0.params == nil }) { return (a.nombre, a.icono) }
+        return nil   // el inicio de LG, un ajuste…: no se enseña
+    }
+
+    // MARK: - Las apps como en TV Libre
+
+    /** Favoritas y el resto, en el orden y sin las ocultas de la pantalla de TV Libre (ver ordenarApps y appsDeFila en app.js). */
+    var filas: (favoritas: [AppTV], resto: [AppTV]) {
+        let d = disposicion
+        let ocultas = Set(d?.ocultas ?? apps.filter { a in OCULTAS_DE_FABRICA.contains { a.id.hasPrefix($0) } }.map(\.id))
+        var pos: [String: Int] = [:]
+        for (i, id) in (d?.orden ?? []).enumerated() where pos[id] == nil { pos[id] = i }
+        // Ordenación estable: las que no tienen puesto se quedan en el orden de la TV
+        let ordenadas = apps.enumerated().sorted { (pos[$0.element.id] ?? 1_000_000, $0.offset) < (pos[$1.element.id] ?? 1_000_000, $1.offset) }.map(\.element)
+        let favIds = d?.favoritas ?? Array(ordenadas.filter { !ocultas.contains($0.id) }.prefix(7).map(\.id))
+        var porId: [String: AppTV] = [:]
+        for a in ordenadas where porId[a.id] == nil { porId[a.id] = a }
+        let favoritas = favIds.compactMap { porId[$0] }.filter { !ocultas.contains($0.id) }
+        let resto = ordenadas.filter { !favIds.contains($0.id) && !ocultas.contains($0.id) }
+        return (favoritas, resto)
+    }
+
+    /** La dirección del móvil en la Wi-Fi, para que TV Libre le mande cómo tiene las apps. */
+    private var direccionMovil: String? {
+        guard oyente != nil, let propia = Self.ipPropia() else { return nil }
+        return "http://\(propia):\(PUERTO_MOVIL)/"
+    }
+
+    private func conMovil(_ p: [String: Any]) -> [String: Any] {
+        var p = p
+        if let d = direccionMovil { p["movil"] = d }
+        return p
+    }
+
+    /** Si TV Libre está delante, le pide que mande cómo tiene las apps (sin cambiar nada en la pantalla de la TV). */
+    func pedirDisposicion() {
+        guard let yo = direccionMovil else { return }
+        Task {
+            guard let r = try? await pedir("ssap://com.webos.applicationManager/getForegroundAppInfo"),
+                  r["appId"] as? String == ID_TV_LIBRE else { return }
+            abrir(ID_TV_LIBRE, parametros: ["movil": yo, "soloMovil": true])
+        }
+    }
+
+    /** Un servidor HTTP mínimo, solo mientras la app está abierta, que solo acepta lo que manda la TV. */
+    private func escuchar() {
+        guard oyente == nil, let puerto = NWEndpoint.Port(rawValue: PUERTO_MOVIL),
+              let o = try? NWListener(using: .tcp, on: puerto) else { return }
+        let tvIP = ip
+        o.newConnectionHandler = { [weak self] c in
+            // Solo la TV: cualquier otro de la red se corta sin leer nada
+            guard case .hostPort(let host, _) = c.endpoint,
+                  "\(host)".split(separator: "%").first.map(String.init) == tvIP else { c.cancel(); return }
+            c.start(queue: .global())
+            Self.leerPeticion(c, Data()) { cuerpo in
+                guard let cuerpo, let d = try? JSONDecoder().decode(Disposicion.self, from: cuerpo) else { return }
+                Task { @MainActor in
+                    guard let self else { return }
+                    UserDefaults.standard.set(cuerpo, forKey: "disposicion:\(self.ip)")
+                    if self.disposicion != d { self.disposicion = d }
+                }
+            }
+        }
+        o.start(queue: .global())
+        oyente = o
+    }
+
+    /** Lee cabeceras y cuerpo (Content-Length), contesta 204 y cierra. */
+    nonisolated private static func leerPeticion(_ c: NWConnection, _ hasta: Data, _ listo: @escaping @Sendable (Data?) -> Void) {
+        c.receive(minimumIncompleteLength: 1, maximumLength: 65536) { datos, _, fin, error in
+            var todo = hasta
+            if let datos { todo.append(datos) }
+            let separador = Data("\r\n\r\n".utf8)
+            if let rango = todo.range(of: separador) {
+                let cabecera = String(decoding: todo[..<rango.lowerBound], as: UTF8.self)
+                let largo = cabecera.split(separator: "\r\n").first { $0.lowercased().hasPrefix("content-length:") }
+                    .flatMap { Int($0.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)) } ?? 0
+                let cuerpo = todo[rango.upperBound...]
+                if cuerpo.count >= largo || fin || error != nil {
+                    let respuesta = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    c.send(content: Data(respuesta.utf8), completion: .contentProcessed { _ in c.cancel() })
+                    listo(cabecera.hasPrefix("POST") ? Data(cuerpo.prefix(largo)) : nil)
+                    return
+                }
+            }
+            if fin || error != nil || todo.count > 70000 { c.cancel(); listo(nil); return }
+            leerPeticion(c, todo, listo)
+        }
+    }
 
     private func cargarListas() async {
         if let r = try? await pedir("ssap://com.webos.applicationManager/listLaunchPoints"),
            let lista = r["launchPoints"] as? [[String: Any]] {
+            var vistos = Set<String>()
             apps = lista.compactMap { a in
-                guard let id = a["id"] as? String, id != ID_TV_LIBRE else { return nil }
+                guard let appId = a["id"] as? String, appId != ID_TV_LIBRE else { return nil }
+                // Como separarAccesos en app/js/luna.js: el acceso principal de cada app se conoce por su id;
+                // los fijados (un vídeo de YouTube…), por su launchPointId, y se abren con sus params
+                let lp = a["launchPointId"] as? String ?? ""
+                let tipo = a["lptype"] as? String ?? ""
+                let principal = !tipo.isEmpty ? tipo == "default" : (lp.isEmpty || lp == appId || lp.hasSuffix("_default"))
+                let id = principal ? appId : (lp.isEmpty ? appId + ":" + (a["title"] as? String ?? "") : lp)
+                guard vistos.insert(id).inserted else { return nil }
                 // Los iconos solo se pueden pedir si la TV los sirve por http; si es una ruta interna, se usa la inicial
                 let ruta = (a["largeIcon"] as? String) ?? (a["icon"] as? String) ?? ""
                 return AppTV(id: id, nombre: a["title"] as? String ?? id,
-                             icono: ruta.hasPrefix("http") ? URL(string: ruta) : nil, color: a["bgColor"] as? String)
+                             icono: ruta.hasPrefix("http") ? URL(string: ruta) : nil, color: a["bgColor"] as? String,
+                             appId: appId, params: principal ? nil : a["params"] as? [String: Any])
             }
         }
         if let r = try? await pedir("ssap://tv/getExternalInputList"),
            let lista = r["devices"] as? [[String: Any]] {
             entradas = lista.compactMap { e in
                 guard let id = e["id"] as? String else { return nil }
-                return EntradaTV(id: id, nombre: e["label"] as? String ?? id)
+                return EntradaTV(id: id, nombre: e["label"] as? String ?? id, appId: e["appId"] as? String ?? "")
             }
         }
     }
@@ -345,6 +497,12 @@ final class TV: NSObject, ObservableObject {
 
     /** "192.168.1" a partir de la IP del móvil en la Wi-Fi (en0). */
     nonisolated private static func redLocal() -> String? {
+        guard let propia = ipPropia() else { return nil }
+        return propia.split(separator: ".")[0...2].joined(separator: ".")
+    }
+
+    /** La IP del móvil en la Wi-Fi (en0). */
+    nonisolated static func ipPropia() -> String? {
         var lista: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&lista) == 0, let primera = lista else { return nil }
         defer { freeifaddrs(lista) }
@@ -353,8 +511,8 @@ final class TV: NSObject, ObservableObject {
             guard String(cString: i.ifa_name) == "en0", let dir = i.ifa_addr, dir.pointee.sa_family == UInt8(AF_INET) else { continue }
             var nombre = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             getnameinfo(dir, socklen_t(dir.pointee.sa_len), &nombre, socklen_t(nombre.count), nil, 0, NI_NUMERICHOST)
-            let partes = String(cString: nombre).split(separator: ".")
-            if partes.count == 4 { return partes[0...2].joined(separator: ".") }
+            let texto = String(cString: nombre)
+            if texto.split(separator: ".").count == 4 { return texto }
         }
         return nil
     }

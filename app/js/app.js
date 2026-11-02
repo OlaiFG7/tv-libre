@@ -253,7 +253,7 @@
 
   // Cada caja mide lo que sus apps, centrada, hasta el ancho de la pantalla (y luego se desplaza).
   // Se centra con left y no con transform para que offsetLeft siga valiendo para el vidrio
-  var MAX_DOCK = 1776, MARGEN_DOCK = 40, VACIA = 760;
+  var MAX_DOCK = 1776, MARGEN_DOCK = 24, VACIA = 760;
   var anchoUtil = [0, 0], izquierda = [0, 0];
   function ajustarDock(f) {
     var n = filas[f].length;
@@ -329,10 +329,27 @@
     enfocado.classList.add('foco');
     if (editando && f <= RESTO) enfocado.classList.add('moviendo');
     if (f <= RESTO) desplazar(f);
+    ponerNombre(f, c);
     ponerPagina(f === RESTO || f === ENTRADAS_F ? 2 : 1);
     // La tarjeta del tiempo crece al enfocarla (previsión por horas): su vidrio se vuelve a recortar
     var tarjeta = $('tarjeta-tiempo');
     if (antes === tarjeta || enfocado === tarjeta) Fondos.colocarVidrio(tarjeta);
+  }
+
+  // Un solo rótulo para las dos filas de apps: se desliza bajo la enfocada (solo transform y opacity)
+  var rotulo = null, rotuloVisible = false;
+  function ponerNombre(f, c) {
+    if (!rotulo) rotulo = $('nombre-foco');
+    if (f > RESTO) { rotulo.classList.remove('visible'); rotuloVisible = false; return; }
+    var dock = $(CONTENEDOR[f]).parentNode;
+    var x = izquierda[f] + MARGEN_DOCK + c * PASO - desp[f] + 104 - 160;   // centrado bajo la app (rótulo de 320)
+    var y = dock.offsetTop + dock.offsetHeight + 12;
+    if (!rotuloVisible) { rotulo.classList.add('quieto'); rotulo.offsetWidth; }   // aparece en su sitio, sin deslizarse
+    rotulo.textContent = filas[f][c].querySelector('.nombre').textContent;
+    rotulo.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0)';
+    rotulo.classList.remove('quieto');
+    rotulo.classList.add('visible');
+    rotuloVisible = true;
   }
 
   // El dock se desliza dejando una app de margen a la izquierda, como en Apple TV
@@ -1341,7 +1358,8 @@
   // ---------- Órdenes desde el móvil ----------
   // La app del móvil abre TV Libre con parámetros (ssap://system.launcher/launch con params):
   // {fondo: id} cambia el fondo, {tema: 'claro'|'oscuro'|'auto'}, {siguiente: true} pasa al siguiente,
-  // {movil: url} dice adónde mandar cómo están las apps y {soloMovil: true} pide solo eso.
+  // {movil: url} dice adónde mandar cómo están las apps y {soloMovil: true} pide solo eso;
+  // {mantenerOk: true} hace lo de mantener OK sobre la app que tiene el foco.
   function parametros() {
     var sistema = window.webOSSystem || window.PalmSystem;
     var p = sistema && sistema.launchParams;
@@ -1373,6 +1391,8 @@
     var d = e && e.detail;
     var p = d && typeof d === 'object' && Object.keys(d).length ? d : parametros();
     atenderParametros(p);
+    // Mantener pulsado el trackpad del móvil = mantener OK (el socket de botones solo sabe pulsar y soltar)
+    if (p.mantenerOk) { if (!panel) mantenerOk(); return; }
     if (p.soloMovil) return;   // el móvil solo pregunta por las apps: la pantalla se queda como está
     var home = !p.fondo && !p.siguiente && !p.tema;
     if (panel === 'cajon') cerrarCajon();
@@ -1406,6 +1426,7 @@
       programarRotacion();
       programarReposo();
       actualizarCalendario();
+      Desarrollo.renovar().catch(function () {});   // que el modo desarrollador no caduque
       actualizarEntradas();   // se enchufan y desenchufan cosas mientras ves otra app
       enfocarUltima();
       if (!marco) mostrarPie();
@@ -1450,6 +1471,7 @@
   setTimeout(avisarDevMode, 3000);
   actualizarTiempo();
   actualizarCalendario();
+  Desarrollo.renovar().catch(function () {});   // que el modo desarrollador no caduque
   programarRotacion();
   programarReposo();
   actualizarEntradas();

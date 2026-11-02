@@ -25,7 +25,15 @@ jobs:
           gradle-version: '8.10.2'
       - name: Compilar
         working-directory: movil/android
-        run: gradle assembleRelease --no-daemon
+        env:
+          MANDO_KEYSTORE: ${{ secrets.MANDO_KEYSTORE }}
+          MANDO_CLAVE: ${{ secrets.MANDO_CLAVE }}
+        run: |
+          if [ -n "$MANDO_KEYSTORE" ]; then
+            echo "$MANDO_KEYSTORE" | base64 -d > "$RUNNER_TEMP/mando.jks"
+            export MANDO_KEYSTORE_FILE="$RUNNER_TEMP/mando.jks"
+          fi
+          gradle assembleRelease --no-daemon
       - name: Publicar en la release "mando"
         env:
           GH_TOKEN: ${{ github.token }}
@@ -33,4 +41,5 @@ jobs:
           cp movil/android/app/build/outputs/apk/release/app-release.apk TVLibreMando.apk
           gh release view mando >/dev/null 2>&1 || gh release create mando --title "Mando para Android" \
             --notes "Abre este enlace en el móvil, descarga TVLibreMando.apk e instálalo (permite instalar apps desconocidas)."
-          gh release upload mando TVLibreMando.apk --clobber
+          echo "{\"version\": $GITHUB_RUN_NUMBER}" > version.json   # lo mira la app para avisar de que hay versión nueva
+          gh release upload mando TVLibreMando.apk version.json --clobber

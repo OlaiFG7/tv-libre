@@ -256,6 +256,20 @@ def guardar_calendario(valor):
     print('Calendario guardado en app/calendario.txt (fuera de git).')
 
 
+def guardar_token_desarrollo(ip, clave):
+    """Copia el token del modo desarrollador de la TV a app/devmode.txt (fuera de git), que va en el paquete:
+    con él, TV Libre renueva sola la sesión de 1000 horas y la TV no borra la app al caducar."""
+    r = ssh(ip, clave, 'cat /var/luna/preferences/devmode_enabled')
+    token = (r.stdout if isinstance(r.stdout, str) else r.stdout.decode()).strip() if r.returncode == 0 else ''
+    if not re.match(r'^[0-9A-Za-z]{16,128}$', token):
+        print('No pude leer el token del modo desarrollador: TV Libre no podrá renovarlo sola.')
+        return
+    ruta = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app', 'devmode.txt')
+    with open(ruta, 'w', encoding='utf-8') as f:
+        f.write(token + '\n')
+    os.chmod(ruta, 0o600)
+
+
 def main():
     calendario = [a for a in sys.argv[1:] if a.startswith('--calendario=')]
     if calendario:
@@ -279,6 +293,8 @@ def main():
     clave = obtener_clave(ip)
     emparejar(ip, clave)
     inicio = time.time()
+    if '--desinstalar' not in sys.argv:
+        guardar_token_desarrollo(ip, clave)
     if '--desinstalar' in sys.argv:
         desinstalar(ip, clave)
     elif '--rapido' in sys.argv:

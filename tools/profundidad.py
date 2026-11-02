@@ -26,6 +26,27 @@ CARPETA = os.path.join(RAIZ, 'app', 'fondos')
 ANCHO, ALTO = 960, 540   # se calcula a media resolución: 4 veces más rápido y bordes de sobra
 
 
+# Caja del reloj en una pantalla de 1920x1080: los dígitos van de y≈165 a y≈405.
+RELOJ_X0, RELOJ_X1, RELOJ_Y1 = 600, 1320, 405
+RELOJ_LIBRE = 0.62   # fracción de arriba del reloj que nunca se tapa (solo asoman las cumbres por abajo)
+
+
+def despejar_reloj(alfa):
+    """Limita el recorte dentro de la caja del reloj a su franja de abajo, con bordes suaves.
+
+    alfa: array float 0-1 de alto x ancho. Fuera de la caja no cambia nada, y como la foto de debajo
+    tiene los mismos píxeles, lo único que pasa es que el reloj queda delante de esas cumbres."""
+    alto, ancho = alfa.shape
+    k = ancho / 1920.0
+    y = np.arange(alto, dtype=np.float32)[:, None] / k
+    x = np.arange(ancho, dtype=np.float32)[None, :] / k
+    corte = 165 + (RELOJ_Y1 - 165) * RELOJ_LIBRE
+    vertical = np.clip((y - corte) / 50.0, 0, 1)                      # 0 arriba, 1 en la franja de abajo
+    dentro = np.clip(np.minimum(x - (RELOJ_X0 - 80), (RELOJ_X1 + 80) - x) / 80.0, 0, 1)
+    dentro = dentro * np.clip((RELOJ_Y1 + 60 - y) / 60.0, 0, 1)       # por debajo del reloj, libre
+    return alfa * (1 - dentro * (1 - vertical))
+
+
 def cielo(img, paso=16.0, lejos=70.0, suelo=0.8, textura=9.0):
     a = np.asarray(img, dtype=np.float32)
     H, W, _ = a.shape
@@ -46,6 +67,21 @@ def cielo(img, paso=16.0, lejos=70.0, suelo=0.8, textura=9.0):
             fila = fila | (cerca & (np.roll(fila, 1) | np.roll(fila, -1)))
         es[y] = fila
         ref[fila] = a[y][fila]
+
+    # Segunda pasada, solo hacia los lados y corta: una banda de nubes con el borde marcado corta el
+    # crecimiento hacia abajo y deja columnas de "primer plano" en pleno cielo. Se rellenan si su color
+    # se parece al del cielo de esa misma fila (así no se come montañas con bruma, que van más lejos)
+    fondo_fila = np.full((H, 3), np.inf, np.float32)
+    con_cielo = es.any(axis=1)
+    for y in np.nonzero(con_cielo)[0]:
+        fondo_fila[y] = np.median(a[y][es[y]], axis=0)
+    parecido = liso & (np.linalg.norm(a - fondo_fila[:, None, :], axis=2) < 2 * paso)
+    parecido[int(suelo * H):] = False
+    for _ in range(30):
+        nuevo = ~es & parecido & (np.roll(es, 1, 1) | np.roll(es, -1, 1))
+        if not nuevo.any():
+            break
+        es |= nuevo
 
     # Limpieza: sin agujeros en el cielo, y solo cuenta el cielo que toca el borde de arriba
     es = ndimage.binary_closing(es, iterations=2, border_value=1)
@@ -70,6 +106,7 @@ def recortar(id_):
     mascara = Image.fromarray((frente * 255).astype(np.uint8)).resize(foto.size, Image.BILINEAR)
     # Borde suave: medio píxel hacia dentro y un difuminado ligero, para que no se vea serrado
     mascara = mascara.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.GaussianBlur(1.2))
+    mascara = Image.fromarray((despejar_reloj(np.asarray(mascara, np.float32) / 255) * 255).astype(np.uint8))
     rgba = foto.copy()
     rgba.putalpha(mascara)
     destino = os.path.join(CARPETA, id_ + '-frente.webp')

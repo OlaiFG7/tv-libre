@@ -39,7 +39,7 @@ data class Disposicion(val favoritas: List<String>, val ocultas: List<String>, v
 private const val PUERTO_MOVIL = 8765
 // Las mismas que TV Libre oculta de fábrica mientras no se sepa cómo las tiene
 private val OCULTAS_DE_FABRICA = Regex("^(com\\.webos\\.|com\\.palm\\.|com\\.lge\\.)")
-data class EntradaTV(val id: String, val nombre: String)
+data class EntradaTV(val id: String, val nombre: String, val appId: String = "")
 data class Fondo(val id: String, val nombre: String, val grupo: String, val miniatura: String?, val colores: List<String>)
 
 class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
@@ -58,6 +58,10 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
     var disposicion: Disposicion? = null
         private set
     private var servidor: ServerSocket? = null
+    /** La app que se ve ahora en la TV (su appId), al día gracias a una suscripción. */
+    var ahora: String? = null
+        private set
+    private val suscripciones = ConcurrentHashMap<String, (JSONObject?) -> Unit>()
 
     private val red = Executors.newSingleThreadExecutor()
     private val principal = Handler(Looper.getMainLooper())
@@ -106,6 +110,8 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
         red.execute { o?.cerrar(); b?.cerrar() }
         runCatching { s?.close() }
         pendientes.clear()
+        suscripciones.clear()
+        ahora = null
     }
 
     /** Borra la clave, la huella y la MAC guardadas: la próxima vez se vuelve a emparejar. */
@@ -137,6 +143,14 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
                     cargarListas()
                     guardarMAC()
                     pedirDisposicion()
+                    suscribir("ssap://com.webos.applicationManager/getForegroundAppInfo") { r ->
+                        val app = r?.optString("appId").orEmpty()
+                        if (app.isNotEmpty() && app != ahora) {
+                            ahora = app
+                            if (app == ID_TV_LIBRE && disposicion == null) pedirDisposicion()
+                            alCambiar()
+                        }
+                    }
                     if (System.currentTimeMillis() < abrirHasta) {
                         abrirHasta = 0
                         principal.postDelayed({ inicio() }, 2500)   // que el sistema termine de arrancar antes
@@ -147,7 +161,7 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
             }
             return
         }
-        val respuesta = pendientes.remove(id) ?: return
+        val respuesta = pendientes.remove(id) ?: suscripciones[id] ?: return
         val ok = tipo != "error" && carga.optBoolean("returnValue", true)
         principal.post { respuesta(if (ok) carga else null) }
     }
@@ -209,6 +223,27 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
     fun tema(tema: String) = abrir(ID_TV_LIBRE, conMovil(JSONObject().put("tema", tema)))
     fun abrir(app: AppTV) = abrir(app.appId, app.params)
 
+    /** Mantener OK: en TV Libre coge la app para moverla (el socket de botones solo sabe pulsar y soltar). */
+    fun mantenerOk() = if (ahora == ID_TV_LIBRE) abrir(ID_TV_LIBRE, JSONObject().put("mantenerOk", true)) else boton("ENTER")
+
+    /** Nombre e icono de lo que se ve ahora en la TV, para la cabecera. */
+    fun queSeVe(): Pair<String, String?>? {
+        val app = ahora ?: return null
+        if (app == ID_TV_LIBRE) return "TV Libre" to null
+        if (app == "com.webos.app.livetv") return "TV" to null
+        entradas.firstOrNull { it.appId == app }?.let { return it.nombre to null }
+        apps.firstOrNull { it.appId == app && it.params == null }?.let { return it.nombre to it.icono }
+        return null   // el inicio de LG, un ajuste…: no se enseña
+    }
+
+    /** Como pedir(), pero la TV sigue avisando cada vez que cambia. */
+    private fun suscribir(uri: String, alCambiar: (JSONObject?) -> Unit) {
+        val ws = ordenes ?: return
+        val id = "s" + siguiente.incrementAndGet()
+        suscripciones[id] = alCambiar
+        red.execute { ws.enviar(JSONObject().put("type", "subscribe").put("id", id).put("uri", uri).put("payload", JSONObject()).toString()) }
+    }
+
     private fun cargarListas() {
         pedir("ssap://com.webos.applicationManager/listLaunchPoints") { r ->
             val lista = r?.optJSONArray("launchPoints") ?: return@pedir
@@ -235,7 +270,7 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
             val lista = r?.optJSONArray("devices") ?: return@pedir
             entradas = (0 until lista.length()).map { i ->
                 val e = lista.getJSONObject(i)
-                EntradaTV(e.optString("id"), e.optString("label", e.optString("id")))
+                EntradaTV(e.optString("id"), e.optString("label", e.optString("id")), e.optString("appId"))
             }
             alCambiar()
         }

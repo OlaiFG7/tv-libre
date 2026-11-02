@@ -5,6 +5,7 @@ import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Dialog
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -16,6 +17,8 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.InputType
 import android.text.TextUtils
@@ -24,6 +27,7 @@ import android.text.method.DigitsKeyListener
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
 import android.view.Window
 import android.view.WindowInsets
@@ -40,10 +44,14 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.net.Uri
+import java.io.File
+import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 // Colores al estilo de iOS: blanco con transparencias sobre la foto difuminada
 private val TEXTO = Color.WHITE
@@ -53,6 +61,8 @@ private val VERDE = 0xFF30D158.toInt()
 private val AMARILLO = 0xFFFFD60A.toInt()
 private val ROJO = 0xFFFF453A.toInt()
 private val AZUL = 0xFF0A84FF.toInt()
+private const val ENLACE_APK = "https://github.com/OlaiFG7/tv-libre/releases/download/mando/TVLibreMando.apk"
+private const val ENLACE_VERSION = "https://github.com/OlaiFG7/tv-libre/releases/download/mando/version.json"
 
 /**
  * Mando de TV Libre para Android, al estilo del mando de Apple TV: el fondo de la TV difuminado detrás,
@@ -73,6 +83,14 @@ class Principal : Activity() {
     private val descargas = Executors.newFixedThreadPool(3)
     private val imagenes = HashMap<String, Bitmap>()
     private val tarjetas = HashMap<String, Pair<GradientDrawable, View>>()   // fondo → (borde, marca de elegido)
+    private val vistas = arrayOfNulls<View>(3)   // las pestañas ya hechas: cambiar de pestaña no las rehace
+    private lateinit var ahoraIcono: ImageView
+    private lateinit var novedad: View
+    @Suppress("DEPRECATION")
+    private val version: Long get() = runCatching {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+    }.getOrDefault(0L)
 
     private val Int.dp get() = (this * resources.displayMetrics.density).toInt()
     private val Float.dp get() = this * resources.displayMetrics.density
@@ -86,6 +104,7 @@ class Principal : Activity() {
         ponerFondo(prefs.getString("fondo", "montanas-amanecer")!!)
         mostrar(0)
         if (tv.ip.isEmpty()) elegirTV()
+        buscarNovedad()
     }
 
     // Conecta solo mientras se ve: nada en segundo plano
@@ -123,8 +142,10 @@ class Principal : Activity() {
         setColor(Color.argb(alfa, 255, 255, 255)); cornerRadius = radio.dp; setStroke(1.dp, Color.argb(borde, 255, 255, 255))
     }
 
-    private fun circulo(alfa: Int = 0x24) = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL; setColor(Color.argb(alfa, 255, 255, 255)); setStroke(1.dp, 0x2EFFFFFF)
+    /** Botón redondo de vidrio: un poco más claro arriba, como si le diera la luz. */
+    private fun circulo(alfa: Int = 0x24) = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+        intArrayOf(Color.argb(min(255, alfa + 0x14), 255, 255, 255), Color.argb(alfa, 255, 255, 255))).apply {
+        shape = GradientDrawable.OVAL; setStroke(1.dp, 0x33FFFFFF)
     }
 
     private fun pulso(v: View) = v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -256,6 +277,14 @@ class Principal : Activity() {
             }
         }
         columna.addView(cabecera())
+        novedad = LinearLayout(this).apply {
+            visibility = View.GONE; gravity = Gravity.CENTER_VERTICAL; setPadding(16.dp, 0, 14.dp, 0)
+            background = GradientDrawable().apply { setColor(0x330A84FF); cornerRadius = 18f.dp; setStroke(1.dp, 0x660A84FF) }
+            addView(texto("Hay una versión nueva del mando", 14f, 600), LinearLayout.LayoutParams(0, -2, 1f))
+            addView(texto("Actualizar", 14f, 700, 0xFF64B5FF.toInt()))
+            pulsable(0.97f) { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ENLACE_APK))) }
+        }
+        columna.addView(novedad, LinearLayout.LayoutParams(-1, 46.dp).apply { topMargin = 14.dp })
         columna.addView(segmentos(listOf("Mando", "Apps", "Fondos"), 0, 42) { if (it == 1) tv.pedirDisposicion(); mostrar(it) },
             LinearLayout.LayoutParams(-1, 42.dp).apply { topMargin = 20.dp; bottomMargin = 16.dp })
         contenido = FrameLayout(this)
@@ -275,6 +304,11 @@ class Principal : Activity() {
         }
         estadoPunto = View(this).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.GRAY) } }
         estado.addView(estadoPunto, LinearLayout.LayoutParams(8.dp, 8.dp).apply { rightMargin = 8.dp })
+        ahoraIcono = ImageView(this).apply {
+            visibility = View.GONE; clipToOutline = true
+            background = GradientDrawable().apply { cornerRadius = 5f.dp; setColor(0x33FFFFFF) }
+        }
+        estado.addView(ahoraIcono, LinearLayout.LayoutParams(18.dp, 18.dp).apply { rightMargin = 7.dp })
         estadoTexto = texto("", 13f, 500, TEXTO_2).apply {
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END; maxWidth = resources.displayMetrics.widthPixels - 150.dp
         }
@@ -303,7 +337,9 @@ class Principal : Activity() {
         val antes = pestana
         pestana = i
         contenido.removeAllViews()
-        val vista = when (i) { 0 -> mando(); 1 -> apps(); else -> fondos() }
+        // El mando y los fondos se hacen una vez; las apps, cuando cambian (ver refrescar)
+        val vista = vistas[i]?.takeIf { i != 1 || it.tag == tv.firmaApps } ?: when (i) { 0 -> mando(); 1 -> apps(); else -> fondos() }
+        vistas[i] = vista
         vista.alpha = 0f
         vista.translationX = when { i > antes -> 28f.dp; i < antes -> -28f.dp; else -> 0f }
         contenido.addView(vista, FrameLayout.LayoutParams(-1, -1))
@@ -316,11 +352,14 @@ class Principal : Activity() {
             TV.Estado.SIN_TV -> Color.GRAY to "Elegir televisor"
             TV.Estado.CONECTANDO -> AMARILLO to "Conectando con ${tv.ip}…"
             TV.Estado.ESPERANDO_PERMISO -> AMARILLO to "Acepta el aviso en la TV"
-            TV.Estado.CONECTADA -> VERDE to "Conectada · ${tv.ip}"
+            TV.Estado.CONECTADA -> VERDE to (tv.queSeVe()?.let { "Ahora: ${it.first}" } ?: "Conectada · ${tv.ip}")
             TV.Estado.ERROR -> ROJO to tv.error
         }
         (estadoPunto.background as GradientDrawable).setColor(color)
         estadoTexto.text = t
+        val icono = tv.queSeVe()?.second.takeIf { tv.estado == TV.Estado.CONECTADA }
+        ahoraIcono.visibility = if (icono != null) View.VISIBLE else View.GONE
+        if (icono != null) cargar(icono, ahoraIcono, 64)
         // El punto late mientras se espera a la TV
         val esperando = tv.estado == TV.Estado.CONECTANDO || tv.estado == TV.Estado.ESPERANDO_PERMISO
         if (esperando && latido == null) {
@@ -343,7 +382,8 @@ class Principal : Activity() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(trackpad(), LinearLayout.LayoutParams(-1, 0, 1f))
 
-        // Como el mando del Apple TV: dos columnas de botones redondos y el volumen en una pastilla alta
+        // Como el mando del Apple TV: dos columnas de botones redondos y una pastilla alta para avanzar y retroceder
+        // (el volumen no: con una barra de sonido por óptico la TV no lo controla)
         val tam = 66
         val bloque = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(6.dp, 20.dp, 6.dp, 0) }
         fun hueco() = bloque.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
@@ -359,7 +399,7 @@ class Principal : Activity() {
             botonRedondo(R.drawable.ic_inicio, tam, "TV Libre") { tv.inicio() },   // TV Libre, no el inicio de LG
             botonRedondo(R.drawable.ic_play_pausa, tam, "Reproducir o pausar") { tv.boton("PLAY") }
         )); hueco()
-        bloque.addView(volumen(), LinearLayout.LayoutParams(tam.dp, (tam * 2 + 14).dp))
+        bloque.addView(avance(), LinearLayout.LayoutParams(tam.dp, (tam * 2 + 14).dp))
         col.addView(bloque)
 
         val colores = LinearLayout(this).apply { setPadding(0, 20.dp, 0, 0) }
@@ -376,22 +416,28 @@ class Principal : Activity() {
         return col
     }
 
-    private fun volumen(): View {
-        val pastilla = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = vidrio(33f, 0x24, 0x2E) }
-        fun parte(res: Int, tam: Int, nombre: String, accion: () -> Unit) = FrameLayout(this).apply {
-            contentDescription = nombre
-            addView(icono(res, if (tam < 22) TEXTO_2 else TEXTO), FrameLayout.LayoutParams(tam.dp, tam.dp, Gravity.CENTER))
-            pulsable(0.85f) { accion() }
+    private fun avance(): View {
+        val pastilla = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x38FFFFFF, 0x24FFFFFF)).apply {
+                cornerRadius = 33f.dp; setStroke(1.dp, 0x33FFFFFF)
+            }
         }
-        pastilla.addView(parte(R.drawable.ic_mas, 24, "Subir volumen") { tv.volumen(true) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        pastilla.addView(parte(R.drawable.ic_silencio, 18, "Silencio") { tv.boton("MUTE") }, LinearLayout.LayoutParams(-1, 0, 0.7f))
-        pastilla.addView(parte(R.drawable.ic_menos, 24, "Bajar volumen") { tv.volumen(false) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        fun parte(res: Int, nombre: String, boton: String) = FrameLayout(this).apply {
+            contentDescription = nombre
+            addView(icono(res), FrameLayout.LayoutParams(26.dp, 26.dp, Gravity.CENTER))
+            pulsable(0.85f) { tv.boton(boton) }
+        }
+        pastilla.addView(parte(R.drawable.ic_adelante, "Avanzar", "FASTFORWARD"), LinearLayout.LayoutParams(-1, 0, 1f))
+        pastilla.addView(View(this).apply { setBackgroundColor(0x24FFFFFF) }, LinearLayout.LayoutParams(-1, 1.dp).apply { leftMargin = 18.dp; rightMargin = 18.dp })
+        pastilla.addView(parte(R.drawable.ic_atras_rapido, "Retroceder", "REWIND"), LinearLayout.LayoutParams(-1, 0, 1f))
         return pastilla
     }
 
     /**
      * Deslizar = flechas: una cada vez que el dedo recorre un tramo, así un deslizamiento largo avanza varias
-     * casillas. Tocar sin moverse = OK. Un brillo sigue al dedo y la flecha de esa dirección se ilumina.
+     * casillas, y si se suelta rápido sigue unas cuantas más, frenando (inercia). Tocar sin moverse = OK y mantener
+     * = mantener OK (en TV Libre, coger la app para moverla). Un brillo sigue al dedo y se ilumina la flecha.
      */
     @SuppressLint("ClickableViewAccessibility")
     private fun trackpad(): View {
@@ -421,7 +467,7 @@ class Principal : Activity() {
             panel.addView(f, FrameLayout.LayoutParams(28.dp, 28.dp, sitio).apply { setMargins(14.dp, 14.dp, 14.dp, 14.dp) })
             flechas[nombre] = f
         }
-        val pista = texto("Desliza para moverte\nToca para OK", 14f, 500, TEXTO_3).apply { gravity = Gravity.CENTER; setLineSpacing(4f.dp, 1f) }
+        val pista = texto("Desliza para moverte\nToca para OK · mantén para coger", 14f, 500, TEXTO_3).apply { gravity = Gravity.CENTER; setLineSpacing(4f.dp, 1f) }
         panel.addView(pista, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
 
         fun destello(nombre: String) {
@@ -436,10 +482,31 @@ class Principal : Activity() {
         }
 
         var x0 = 0f; var y0 = 0f; var xInicio = 0f; var yInicio = 0f; var movido = false
+        var ultima = "RIGHT"
         val tramo = 46.dp
+        val reloj = Handler(Looper.getMainLooper())
+        var velocidad: VelocityTracker? = null
+        val mantener = Runnable {
+            movido = true   // al soltar ya no es un OK
+            panel.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            brillo.animate().scaleX(1.6f).scaleY(1.6f).setDuration(200).start()
+            tv.mantenerOk()
+        }
+        fun inercia(pasos: Int) {
+            var espera = 0L
+            for (k in 1..pasos) {
+                espera += 55L + k * 25L   // cada vez un poco más despacio, como un objeto que frena
+                reloj.postDelayed({ tv.boton(ultima); destello(ultima); if (k == 1) pulso(panel) }, espera)
+            }
+        }
         panel.setOnTouchListener { v, e ->
+            velocidad?.addMovement(e)
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    reloj.removeCallbacksAndMessages(null)   // un toque para la inercia que quedara
+                    velocidad?.recycle(); velocidad = VelocityTracker.obtain().apply { addMovement(e) }
+                    reloj.postDelayed(mantener, 520)
+                    brillo.scaleX = 1f; brillo.scaleY = 1f
                     x0 = e.x; y0 = e.y; xInicio = e.x; yInicio = e.y; movido = false
                     brillo.translationX = e.x - 75.dp; brillo.translationY = e.y - 75.dp
                     brillo.animate().alpha(1f).setDuration(120).start()
@@ -448,15 +515,24 @@ class Principal : Activity() {
                 MotionEvent.ACTION_MOVE -> {
                     brillo.translationX = e.x - 75.dp; brillo.translationY = e.y - 75.dp
                     val dx = e.x - x0; val dy = e.y - y0
+                    if (max(abs(e.x - xInicio), abs(e.y - yInicio)) > 14.dp) reloj.removeCallbacks(mantener)
                     if (max(abs(dx), abs(dy)) > tramo) {
                         val d = direccion(dx, dy)
                         pulso(v); tv.boton(d); destello(d)
-                        x0 = e.x; y0 = e.y; movido = true
+                        x0 = e.x; y0 = e.y; movido = true; ultima = d
                     }
                 }
                 MotionEvent.ACTION_UP -> {
+                    reloj.removeCallbacks(mantener)
                     soltar()
                     val dx = e.x - xInicio; val dy = e.y - yInicio
+                    val vt = velocidad?.apply { computeCurrentVelocity(1000) }
+                    // Soltar rápido en la misma dirección: unos pasos más (hasta 5), según lo rápido que iba el dedo
+                    if (movido && vt != null) {
+                        val rapidez = max(abs(vt.xVelocity), abs(vt.yVelocity)) / resources.displayMetrics.density
+                        if (rapidez > 900 && direccion(vt.xVelocity, vt.yVelocity) == ultima) inercia(min(5, ((rapidez - 600) / 500).toInt()))
+                    }
+                    velocidad?.recycle(); velocidad = null
                     if (!movido) {
                         if (abs(dx) < 14.dp && abs(dy) < 14.dp) {
                             v.performHapticFeedback(if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY)
@@ -470,7 +546,7 @@ class Principal : Activity() {
                     }
                     v.performClick()
                 }
-                MotionEvent.ACTION_CANCEL -> soltar()
+                MotionEvent.ACTION_CANCEL -> { reloj.removeCallbacks(mantener); velocidad?.recycle(); velocidad = null; soltar() }
             }
             true
         }
@@ -712,20 +788,61 @@ class Principal : Activity() {
         )
     }
 
-    /** Descarga una imagen pequeña (miniatura o icono) en otro hilo y la guarda en memoria mientras la app está abierta. */
-    private fun cargar(url: String, destino: ImageView, listo: (() -> Unit)? = null) {
-        imagenes[url]?.let { destino.setImageBitmap(it); listo?.invoke(); return }
-        destino.tag = url
+    /**
+     * Descarga una imagen (miniatura o icono) en otro hilo. Se guarda en disco, así la próxima vez sale al
+     * instante, y se reduce al tamaño al que se ve (menos memoria). El fondo, en Android 11 o anterior, se encoge
+     * mucho: al estirarlo queda difuminado casi gratis (en 12+ lo difumina la tarjeta gráfica con RenderEffect).
+     */
+    private fun cargar(url: String, destino: ImageView, tamMax: Int = 320, listo: (() -> Unit)? = null) {
+        val esFondo = destino === fondoImagen
+        val clave = if (esFondo) "$url#fondo" else url
+        imagenes[clave]?.let { destino.setImageBitmap(it); listo?.invoke(); return }
+        destino.tag = clave
         descargas.execute {
-            val bitmap = runCatching { URL(url).openStream().use { BitmapFactory.decodeStream(it) } }.getOrNull() ?: return@execute
+            val archivo = File(cacheDir, "img-" + Integer.toHexString(url.hashCode()))
+            val bytes = runCatching {
+                if (archivo.exists()) archivo.readBytes()
+                else (URL(url).openConnection() as HttpURLConnection).run {
+                    connectTimeout = 5000; readTimeout = 8000
+                    inputStream.use { it.readBytes() }
+                }.also { archivo.writeBytes(it) }
+            }.getOrNull() ?: return@execute
+            val medidas = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, medidas)
+            val objetivo = if (esFondo && Build.VERSION.SDK_INT < 31) 48 else tamMax
+            var muestra = 1
+            while (max(medidas.outWidth, medidas.outHeight) / (muestra * 2) >= objetivo) muestra *= 2
+            var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = muestra })
+                ?: return@execute
+            if (esFondo && Build.VERSION.SDK_INT < 31 && bitmap.width > 48)
+                bitmap = Bitmap.createScaledBitmap(bitmap, 48, max(1, 48 * bitmap.height / bitmap.width), true)
+            val listoBitmap = bitmap
             runOnUiThread {
-                imagenes[url] = bitmap
-                if (destino.tag == url) {
+                imagenes[clave] = listoBitmap
+                if (destino.tag == clave) {
                     destino.alpha = 0f
-                    destino.setImageBitmap(bitmap)
-                    destino.animate().alpha(if (destino === fondoImagen) 0.85f else 1f).setDuration(300).start()
+                    destino.setImageBitmap(listoBitmap)
+                    destino.animate().alpha(if (esFondo) 0.85f else 1f).setDuration(300).start()
                     listo?.invoke()
                 }
+            }
+        }
+    }
+
+    /** Mira en GitHub si hay una versión más nueva del mando (un archivo de pocos bytes) y, si la hay, lo avisa. */
+    private fun buscarNovedad() {
+        val mia = version
+        descargas.execute {
+            val texto = runCatching {
+                (URL(ENLACE_VERSION).openConnection() as HttpURLConnection).run {
+                    connectTimeout = 5000; readTimeout = 5000
+                    inputStream.bufferedReader().use { it.readText() }
+                }
+            }.getOrNull() ?: return@execute
+            val ultima = runCatching { org.json.JSONObject(texto).optLong("version") }.getOrDefault(0L)
+            if (mia in 1 until ultima) runOnUiThread {
+                novedad.visibility = View.VISIBLE
+                novedad.alpha = 0f; novedad.animate().alpha(1f).setDuration(300).start()
             }
         }
     }
@@ -768,6 +885,7 @@ class Principal : Activity() {
         cuerpo.addView(texto("La primera vez la TV pregunta si permites el acceso: acéptalo con el mando.", 13f, 400, TEXTO_3).apply {
             setPadding(4.dp, 16.dp, 4.dp, 0); setLineSpacing(3f.dp, 1f)
         })
+        cuerpo.addView(texto("Mando versión 1.$version", 12f, 500, TEXTO_3).apply { setPadding(4.dp, 8.dp, 4.dp, 0) })
 
         val d = hoja("Televisor", cuerpo)
         cuerpo.addView(boton("Conectar", principal = true) {

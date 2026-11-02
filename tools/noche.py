@@ -103,7 +103,8 @@ def guardar(id_, sufijo, img, mascara, con_frente):
     vidrio(destino, os.path.join(CARPETA, id_ + sufijo + '-vidrio.jpg'))
     if con_frente:
         rgba = img.copy()
-        rgba.putalpha(Image.fromarray((mascara[..., 0] * 255).astype(np.uint8)))
+        from profundidad import despejar_reloj
+        rgba.putalpha(Image.fromarray((despejar_reloj(mascara[..., 0]) * 255).astype(np.uint8)))
         rgba.save(os.path.join(CARPETA, id_ + sufijo + '-frente.webp'), 'WEBP', quality=80, method=6)
 
 
