@@ -263,7 +263,8 @@ final class TV: NSObject, ObservableObject {
      * Paquete mágico: 6 × 0xFF y la MAC 16 veces. iOS no deja enviar a la dirección de difusión sin un permiso
      * especial de Apple (multicast entitlement), así que se manda directo a la IP de la TV: funciona mientras el
      * router aún recuerda su MAC (normalmente un buen rato después de apagarla). En la TV hay que activar
-     * "Encender TV con móvil".
+     * "Encender TV con móvil". Cuando la TV contesta se abre TV Libre: una app de desarrollador no puede
+     * abrirse sola al encender.
      */
     func encender() {
         guard let mac = UserDefaults.standard.string(forKey: "mac:\(ip)") else { return }
@@ -279,7 +280,17 @@ final class TV: NSObject, ObservableObject {
             }
             c.start(queue: .global())
         }
-        Task { try? await Task.sleep(nanoseconds: 6_000_000_000); await conectar() }
+        // La TV tarda en arrancar: se reintenta hasta que conteste, y entonces se abre TV Libre
+        Task {
+            for i in 0..<10 {
+                try? await Task.sleep(nanoseconds: i == 0 ? 6_000_000_000 : 4_000_000_000)
+                if estado == .conectada { break }
+                if estado != .conectando { await conectar() }
+            }
+            guard estado == .conectada else { return }
+            try? await Task.sleep(nanoseconds: 2_500_000_000)   // que el sistema termine de arrancar antes
+            inicio()
+        }
     }
 
     // MARK: - Buscar la TV

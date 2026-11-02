@@ -50,6 +50,7 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
     private var botones: WebSocket? = null
     private val pendientes = ConcurrentHashMap<String, (JSONObject?) -> Unit>()
     private val siguiente = AtomicInteger()
+    @Volatile private var abrirHasta = 0L   // tras encenderla, si conecta antes de esta hora se abre TV Libre
 
     private fun cambiar(nuevo: Estado, texto: String = "") {
         principal.post { estado = nuevo; error = texto; alCambiar() }
@@ -117,6 +118,10 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
                     abrirBotones()
                     cargarListas()
                     guardarMAC()
+                    if (System.currentTimeMillis() < abrirHasta) {
+                        abrirHasta = 0
+                        principal.postDelayed({ inicio() }, 2500)   // que el sistema termine de arrancar antes
+                    }
                 }
                 "error" -> cambiar(Estado.ERROR, "La TV rechazó el emparejamiento")
                 else -> if (carga.optString("pairingType") == "PROMPT") cambiar(Estado.ESPERANDO_PERMISO)
@@ -219,7 +224,10 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
 
     val puedeEncender get() = prefs.getString("mac:$ip", null) != null
 
-    /** Paquete mágico (6 × 0xFF y 16 veces la MAC) a toda la red. En la TV: "Encender TV con móvil" activado. */
+    /**
+     * Paquete mágico (6 × 0xFF y 16 veces la MAC) a toda la red. En la TV: "Encender TV con móvil" activado.
+     * Cuando la TV contesta se abre TV Libre: una app de desarrollador no puede abrirse sola al encender.
+     */
     fun encender() {
         val mac = prefs.getString("mac:$ip", null) ?: return
         val bytes = mac.split(":").mapNotNull { it.toIntOrNull(16)?.toByte() }
@@ -234,8 +242,13 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
                     }
                 }
             } catch (_: Exception) {}
-            Thread.sleep(6000)
-            principal.post { conectar() }
+            // La TV tarda en arrancar: se reintenta hasta que conteste, y al conectar se abre TV Libre
+            abrirHasta = System.currentTimeMillis() + 60_000
+            for (i in 1..10) {
+                Thread.sleep(if (i == 1) 6000 else 4000)
+                if (estado == Estado.CONECTADA) break
+                if (estado != Estado.CONECTANDO) principal.post { conectar() }
+            }
         }.start()
     }
 

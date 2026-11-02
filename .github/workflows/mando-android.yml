@@ -1,0 +1,36 @@
+# Compila el mando de Android en GitHub (no en tu ordenador) y deja el .apk en la release "mando":
+# https://github.com/OlaiFG7/tv-libre/releases/download/mando/TVLibreMando.apk
+name: Mando Android
+
+on:
+  push:
+    branches: [main]
+    paths: ['movil/android/**', 'movil/compartido/**', '.github/workflows/mando-android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Compilar
+        working-directory: movil/android
+        run: gradle assembleRelease --no-daemon
+      - name: Publicar en la release "mando"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp movil/android/app/build/outputs/apk/release/app-release.apk TVLibreMando.apk
+          gh release view mando >/dev/null 2>&1 || gh release create mando --title "Mando para Android" \
+            --notes "Abre este enlace en el móvil, descarga TVLibreMando.apk e instálalo (permite instalar apps desconocidas)."
+          gh release upload mando TVLibreMando.apk --clobber

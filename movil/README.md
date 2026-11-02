@@ -38,7 +38,9 @@ Al conectar, la app guarda la MAC de la TV. Para encenderla manda un paquete Wak
 
 ### Android (`android/`)
 
-Hace falta el SDK de Android: Android Studio, o las *command line tools* con `platforms;android-35` y `build-tools;35.0.0`.
+**Sin compilar nada**: abre en el móvil https://github.com/OlaiFG7/tv-libre/releases/download/mando/TVLibreMando.apk, descárgalo, ábrelo y permite *instalar apps desconocidas*. GitHub lo compila solo (`.github/workflows/mando-android.yml`) cada vez que cambia `movil/android`.
+
+Para compilarlo tú, hace falta el SDK de Android: Android Studio, o las *command line tools* con `platforms;android-35` y `build-tools;35.0.0`.
 
 ```bash
 cd movil/android
