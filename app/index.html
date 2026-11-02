@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>TV Libre</title>
+  <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body class="entrada">
+  <div id="foto" class="capa"></div>
+  <div id="borroso-a" class="capa borroso"></div>
+  <div id="borroso-b" class="capa borroso"></div>
+  <div class="velo"></div>
+
+  <header id="cabecera" class="cabecera">
+    <div id="fecha" class="fecha"></div>
+    <div id="reloj" class="reloj"><span class="relleno"></span><span class="borde"></span><span class="reflejo"></span></div>
+  </header>
+
+  <!-- El primer plano de la foto (cumbres, edificios), por encima del reloj: el efecto de profundidad -->
+  <div id="frente" class="capa frente"></div>
+
+  <section id="dock" class="dock vidrio">
+    <div class="vidrio-fondo"></div>
+    <div id="aviso-edicion" class="aviso-edicion">Moviendo · ◀ ▶ mover · OK ocultar o mostrar · Atrás terminar</div>
+    <div id="fila-apps" class="fila"></div>
+  </section>
+
+  <div id="fila-entradas" class="entradas vidrio"><div class="vidrio-fondo"></div></div>
+
+  <div id="boton-ajustes" class="boton-ajustes vidrio"><div class="vidrio-fondo"></div></div>
+
+  <footer id="pie" class="pie">
+    <span><i class="punto rojo"></i>Fondo</span>
+    <span><i class="punto verde"></i>Claro / oscuro</span>
+    <span>Mantén OK para mover</span>
+    <span><i class="punto azul"></i>Ajustes</span>
+  </footer>
+
+  <div id="cajon" class="cajon vidrio">
+    <div class="vidrio-fondo"></div>
+    <h2>Todas las apps</h2>
+    <div id="rejilla" class="rejilla"></div>
+  </div>
+
+  <aside id="ajustes" class="ajustes vidrio">
+    <div class="vidrio-fondo"></div>
+    <h2>Ajustes</h2>
+    <div id="lista-ajustes" class="lista-ajustes"></div>
+    <p class="nota">◀ ▶ cambiar · Atrás cerrar</p>
+  </aside>
+
+  <div id="aviso" class="aviso vidrio"><div class="vidrio-fondo"></div><span id="aviso-icono"></span><span id="aviso-texto"></span></div>
+  <div id="atenuador"></div>
+
+  <script src="js/luna.js"></script>
+  <script src="js/tiempo.js"></script>
+  <script src="js/fondos.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

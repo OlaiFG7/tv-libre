@@ -1,0 +1,23 @@
+# TV Libre: dominios de publicidad y telemetría de LG webOS
+# Formato de lista simple (un dominio por línea): válido para Pi-hole (Adlists o Domains) y AdGuard Home.
+# Recopilados de listas de la comunidad; no es exhaustiva y LG cambia dominios con el tiempo.
+#
+# NO bloquees estos, rompen cosas:
+#   lgtvsdp.com / *.lgtvsdp.com     tienda de apps y cuenta LG
+#   lgappstv.com                    descargas de la tienda (ibis.lgappstv.com es telemetría y va abajo;
+#                                   si tras bloquearlo la tienda no descarga, quítalo de la lista)
+#   snu.lge.com                     actualizaciones de firmware
+#
+# Publicidad (banners de inicio, anuncios en apps de LG)
+ad.lgsmartad.com
+us.ad.lgsmartad.com
+eu.ad.lgsmartad.com
+info.lgsmartad.com
+us.info.lgsmartad.com
+eu.info.lgsmartad.com
+lgad.cjpowercast.com
+# Telemetría y reconocimiento de contenido (Live Plus / ACR)
+ngfts.lge.com
+aic-ngfts.lge.com
+ibis.lgappstv.com
+smartshare.lgtvsdp.com

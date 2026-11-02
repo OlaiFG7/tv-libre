@@ -1,0 +1,534 @@
+/*
+ * Estética tipo Apple TV con "vidrio líquido".
+ *
+ * Reglas de rendimiento (webOS 5 = Chromium 68 en un chip modesto):
+ *  - Solo se animan transform y opacity, que van por el compositor y no repintan.
+ *  - Las sombras de foco son pseudo-elementos que cambian de opacidad, no box-shadow animados.
+ *  - Nada se anima en bucle salvo la app que estás moviendo.
+ *  - Sin backdrop-filter (llega en Chromium 76) ni filter: blur(): el vidrio usa una copia pequeña
+ *    ya difuminada del fondo (ver .vidrio-fondo y js/fondos.js). Dibujar un panel de vidrio cuesta
+ *    lo mismo que dibujar una imagen.
+ *  - Sin gap en flex (Chromium 84): márgenes.
+ *
+ * Capas: foto 0 · copias difuminadas 1 · velo 2 · reloj 3 · primer plano 4 · interfaz 5 · paneles 10.
+ */
+
+/* Fuentes: si se añaden Inter y Antonio a app/fonts/, declararlas aquí con @font-face.
+   Sin ellas se usan las de la TV (no se piden archivos que no existen). */
+
+:root {
+  --texto: #ffffff;
+  --texto-2: rgba(255, 255, 255, 0.66);
+  --tinte: rgba(22, 22, 28, 0.24);
+  --tinte-solido: rgba(28, 28, 34, 0.86);
+  --brillo: rgba(255, 255, 255, 0.5);
+  --canto: rgba(255, 255, 255, 0.16);
+  --chip: rgba(255, 255, 255, 0.1);
+  --foco-fondo: #ffffff;
+  --foco-texto: #111114;
+  --sombra: rgba(0, 0, 0, 0.4);
+  --muelle: cubic-bezier(0.2, 0.9, 0.25, 1.15);
+  --suave: cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+body.claro {
+  --texto: #111114;
+  --texto-2: rgba(17, 17, 20, 0.62);
+  --tinte: rgba(255, 255, 255, 0.36);
+  --tinte-solido: rgba(250, 250, 252, 0.92);
+  --brillo: rgba(255, 255, 255, 0.85);
+  --canto: rgba(255, 255, 255, 0.5);
+  --chip: rgba(255, 255, 255, 0.3);
+  --foco-fondo: #ffffff;
+  --foco-texto: #000000;
+  --sombra: rgba(30, 40, 60, 0.25);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { width: 1920px; height: 1080px; overflow: hidden; }
+
+body {
+  font-family: "Inter", "SF Pro Display", -apple-system, "Helvetica Neue", "LG Smart UI", Roboto, Arial, sans-serif;
+  color: var(--texto);
+  background: #000;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.01em;
+}
+
+/* Al cambiar de tema, los colores se funden. Solo durante el cambio, para no cargar el resto de transiciones. */
+body.cambiando-tema .vidrio,
+body.cambiando-tema .fecha,
+body.cambiando-tema .ajuste,
+body.cambiando-tema .pie span {
+  transition: background-color 0.6s var(--suave), color 0.6s var(--suave);
+}
+
+body.sin-animaciones *, body.sin-animaciones *::before, body.sin-animaciones *::after {
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
+}
+
+.oculto { display: none !important; }
+
+/* ---------- Fondo y transición difuminada ---------- */
+
+.capa {
+  position: absolute;
+  left: 0; top: 0;
+  width: 1920px; height: 1080px;
+  background-size: 1920px 1080px;
+  background-position: 0 0;
+  background-repeat: no-repeat;
+  transition: transform 1.6s var(--suave), opacity 0.6s ease-in-out;
+}
+#foto { z-index: 0; }
+/* La foto nueva entra un poco acercada y se asienta: sensación de profundidad, solo transform */
+.capa.acercada { transform: scale(1.045); transition: none; }
+.borroso { z-index: 1; opacity: 0; transition: opacity 0.5s ease-in-out; will-change: opacity; }
+.frente { z-index: 4; opacity: 0; pointer-events: none; }
+body.sin-profundidad .frente { display: none; }
+
+/* Viñeta para que el reloj y los textos se lean sobre cualquier foto */
+.velo {
+  position: absolute;
+  left: 0; top: 0; width: 1920px; height: 1080px;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.9s var(--suave);
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.32) 0%, rgba(0, 0, 0, 0) 30%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.38) 100%);
+}
+body.foto .velo { opacity: 1; }
+
+/* ---------- Vidrio líquido ---------- */
+
+.vidrio {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background-color: var(--tinte);
+  box-shadow:
+    inset 0 1.5px 0 var(--brillo),          /* canto de luz arriba */
+    inset 0 -1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 0 1px var(--canto),           /* borde fino */
+    0 24px 60px var(--sombra);
+}
+/* Recorte de la copia difuminada del fondo: lo coloca Fondos.colocarVidrio() */
+.vidrio-fondo {
+  position: absolute;
+  z-index: -2;
+  background-size: 1920px 1080px;
+  background-repeat: no-repeat;
+  transition: opacity 0.45s ease-in-out;
+}
+body.transicion .vidrio-fondo { opacity: 0; }
+/* Tinte encima del recorte, con el reflejo especular: luz que entra por arriba y rebota en el borde */
+.vidrio::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; right: 0; bottom: 0;
+  z-index: -1;
+  background-color: inherit;
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.04) 40%, rgba(255, 255, 255, 0) 60%),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 25%);
+  border-radius: inherit;
+}
+body.vidrio-sencillo .vidrio-fondo { display: none; }
+body.vidrio-sencillo .vidrio { background-color: var(--tinte-solido); }
+
+/* ---------- Fecha, tiempo y reloj (pantalla de bloqueo de Apple, idea de couch-tv) ---------- */
+
+.cabecera {
+  position: absolute;
+  left: 0; right: 0;
+  top: 64px;
+  z-index: 3;
+  text-align: center;
+}
+.fecha {
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 44px;
+  color: var(--texto);
+  white-space: nowrap;
+}
+.fecha::first-letter { text-transform: uppercase; }
+.fecha .clima { color: var(--texto-2); font-weight: 500; margin-left: 22px; }
+.fecha svg { width: 36px; height: 36px; vertical-align: -8px; margin-right: 8px; }
+body.foto .fecha { color: #fff; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.3); }
+body.foto .fecha .clima { color: rgba(255, 255, 255, 0.82); }
+body.sin-fecha .fecha { visibility: hidden; }
+
+/* Tres capas del mismo texto: relleno (la copia difuminada del fondo recortada a las cifras),
+   borde fino y reflejo. Se repinta una vez por minuto. */
+.reloj {
+  position: relative;
+  display: inline-block;
+  margin-top: 4px;
+  font-family: "Antonio", "Arial Narrow", "Roboto Condensed", "Helvetica Neue", sans-serif;
+  font-weight: 300;
+  font-size: 330px;
+  line-height: 0.84;
+  letter-spacing: -4px;
+  white-space: nowrap;
+  filter: drop-shadow(0 6px 28px rgba(0, 0, 0, 0.18));
+}
+.reloj span { display: block; }
+.reloj .relleno {
+  padding: 0.12em 0.04em;
+  margin: -0.12em -0.04em;
+  color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+  background-repeat: no-repeat;
+  transition: opacity 0.45s ease-in-out;
+}
+body.transicion .reloj .relleno { opacity: 0.35; }
+.reloj .borde, .reloj .reflejo { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+.reloj .borde { color: rgba(255, 255, 255, 0.08); -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.62); }
+.reloj .reflejo {
+  color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+  background-image: linear-gradient(160deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, 0) 70%, rgba(255, 255, 255, 0.25) 100%);
+}
+/* Sobre un fondo minimalista claro, el vidrio se oscurece para que se lea */
+body.claro:not(.foto) .reloj .borde { color: rgba(0, 0, 0, 0.04); -webkit-text-stroke-color: rgba(0, 0, 0, 0.22); }
+body.claro:not(.foto) .reloj .reflejo { opacity: 0.6; }
+body.claro:not(.foto) .reloj { filter: none; }
+/* Reloj fino: texto liso, sin vidrio */
+body.reloj-fino .reloj { font-family: "Inter", "Helvetica Neue", sans-serif; font-weight: 200; font-size: 250px; letter-spacing: -8px; }
+body.reloj-fino .reloj .relleno { background: none !important; color: #fff; }
+body.claro:not(.foto).reloj-fino .reloj .relleno { color: var(--texto); }
+body.reloj-fino .reloj .borde, body.reloj-fino .reloj .reflejo { display: none; }
+body.reloj-oculto .reloj { visibility: hidden; }
+
+/* ---------- Dock de apps ---------- */
+
+.dock {
+  position: absolute;
+  z-index: 5;
+  left: 72px;
+  width: 1776px;
+  top: 510px;
+  height: 330px;
+  border-radius: 52px;
+}
+
+.aviso-edicion {
+  position: absolute;
+  left: 64px;
+  top: 24px;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--texto-2);
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.3s, transform 0.3s var(--suave);
+}
+body.editando .aviso-edicion { opacity: 1; transform: none; }
+
+.fila {
+  position: absolute;
+  left: 64px;
+  top: 76px;
+  display: flex;
+  transition: transform 0.5s var(--suave);
+  will-change: transform;
+}
+
+.app {
+  position: relative;
+  flex: 0 0 auto;
+  width: 288px;
+  height: 162px;
+  margin-right: 40px;
+  transition: transform 0.4s var(--muelle), opacity 0.3s;
+  will-change: transform;
+}
+/* Sombra del foco: se enciende con opacity */
+.app::before {
+  content: "";
+  position: absolute;
+  left: 8%; right: 8%; top: 30%; bottom: -6%;
+  border-radius: 28px;
+  box-shadow: 0 30px 50px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 0.35s;
+}
+.app .cara {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 26px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 72px;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.app .cara img { width: 112px; height: 112px; object-fit: contain; }
+/* Brillo especular encima del icono: se intensifica al enfocar, como en tvOS */
+.app .cara::after {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; right: 0; bottom: 0;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0.06) 38%, rgba(255, 255, 255, 0) 55%);
+  opacity: 0.3;
+  transition: opacity 0.35s;
+}
+.app .nombre {
+  position: absolute;
+  left: -20px; right: -20px;
+  top: 186px;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.25s, transform 0.4s var(--suave);
+}
+.app.foco { transform: scale(1.15) translateY(-6px); }
+.app.foco::before { opacity: 1; }
+.app.foco .cara::after { opacity: 1; }
+.app.foco .nombre { opacity: 1; transform: translateY(6px) scale(0.87); }   /* compensa el scale del padre */
+.app.escondida { opacity: 0.28; }
+.app.moviendo { animation: temblor 0.32s ease-in-out infinite alternate; }
+@keyframes temblor {
+  from { transform: scale(1.15) translateY(-6px) rotate(-1.2deg); }
+  to { transform: scale(1.15) translateY(-6px) rotate(1.2deg); }
+}
+
+/* La última del dock: "Todas las apps" */
+.app.mas .cara { background-color: rgba(255, 255, 255, 0.14); color: var(--texto); }
+body.claro .app.mas .cara { background-color: rgba(255, 255, 255, 0.45); }
+.app.mas .cara svg { width: 72px; height: 72px; }
+
+/* ---------- Entradas (botones de vidrio) ---------- */
+
+/* Caja de vidrio con las entradas, debajo del dock */
+.entradas {
+  position: absolute;
+  left: 72px;
+  top: 876px;
+  z-index: 5;
+  display: flex;
+  padding: 14px;
+  border-radius: 52px;
+}
+.chip {
+  display: flex;
+  align-items: center;
+  height: 76px;
+  padding: 0 32px 0 26px;
+  margin-right: 22px;
+  border-radius: 38px;
+  position: relative;
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--texto);
+  transition: transform 0.35s var(--muelle);
+  will-change: transform;
+}
+body.foto:not(.claro) .chip { color: #fff; }
+.chip svg { width: 34px; height: 34px; margin-right: 14px; }
+/* Enfocado: la cápsula se vuelve blanca y opaca, como los botones de tvOS */
+.chip::after {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; right: 0; bottom: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--foco-fondo);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.chip:last-child { margin-right: 0; }
+.chip.foco { transform: scale(1.1); color: var(--foco-texto) !important; }
+.chip.foco::after { opacity: 1; }
+
+/* ---------- Botón de ajustes (arriba a la derecha) ---------- */
+
+.boton-ajustes {
+  position: absolute;
+  right: 64px;
+  top: 52px;
+  z-index: 5;
+  width: 80px;
+  height: 80px;
+  border-radius: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--texto);
+  transition: transform 0.35s var(--muelle);
+}
+body.foto:not(.claro) .boton-ajustes { color: #fff; }
+.boton-ajustes svg { width: 40px; height: 40px; position: relative; }
+.boton-ajustes::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 0; top: 0; right: 0; bottom: 0;
+  border-radius: inherit;
+  background: var(--foco-fondo);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.boton-ajustes.foco { transform: scale(1.14); color: var(--foco-texto) !important; }
+.boton-ajustes.foco::after { opacity: 1; }
+body.entrada .boton-ajustes { opacity: 0; }
+body.editando .boton-ajustes { opacity: 0.3; }
+
+/* ---------- Pie ---------- */
+
+.pie {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 30px;
+  z-index: 5;
+  text-align: center;
+  font-size: 21px;
+  font-weight: 500;
+  transition: opacity 0.8s;
+}
+.pie span { display: inline-block; margin: 0 18px; color: var(--texto-2); }
+body.foto .pie span { color: rgba(255, 255, 255, 0.75); }
+.pie.apagado { opacity: 0; }
+.punto { display: inline-block; width: 16px; height: 16px; border-radius: 50%; margin-right: 10px; vertical-align: -1px; }
+.punto.rojo { background: #ff453a; }
+.punto.verde { background: #32d74b; }
+.punto.amarillo { background: #ffd60a; }
+.punto.azul { background: #0a84ff; }
+
+/* ---------- Todas las apps ---------- */
+
+.cajon {
+  position: absolute;
+  left: 140px;
+  top: 90px;
+  width: 1640px;
+  height: 900px;
+  border-radius: 52px;
+  padding: 56px 72px;
+  z-index: 10;
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.96);
+  transition: opacity 0.3s var(--suave), transform 0.45s var(--suave), visibility 0s 0.45s;
+}
+.cajon.abierto {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: opacity 0.3s var(--suave), transform 0.45s var(--muelle), visibility 0s;
+}
+.cajon h2, .ajustes h2 { font-size: 46px; font-weight: 700; letter-spacing: -0.8px; }
+.cajon h2 { margin-bottom: 36px; }
+.rejilla { position: relative; height: 700px; overflow: hidden; }
+.rejilla-dentro { transition: transform 0.45s var(--suave); }
+.rejilla .app { float: left; width: 216px; height: 122px; margin: 0 38px 92px 0; }   /* 6 × 216 + 5 × 38 cabe */
+.rejilla .app:nth-child(6n) { margin-right: 0; }
+.rejilla .app .cara img { width: 84px; height: 84px; }
+.rejilla .app .cara { font-size: 54px; border-radius: 22px; }
+.rejilla .app .nombre { top: 136px; font-size: 22px; }
+.rejilla .app.foco { transform: scale(1.12); }
+.rejilla .app.foco .nombre { transform: translateY(4px) scale(0.893); }
+
+/* ---------- Ajustes (hoja lateral) ---------- */
+
+.ajustes {
+  position: absolute;
+  right: 48px;
+  top: 48px;
+  width: 780px;
+  height: 984px;
+  border-radius: 52px;
+  padding: 52px 48px;
+  z-index: 10;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(60px) scale(0.98);
+  transition: opacity 0.35s var(--suave), transform 0.45s var(--suave), visibility 0s 0.45s;
+}
+.ajustes.abierto {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: opacity 0.35s var(--suave), transform 0.45s var(--suave), visibility 0s;
+}
+.ajustes h2 { margin: 0 0 18px 20px; }
+.lista-ajustes { height: 800px; overflow: hidden; }
+.lista-dentro { transition: transform 0.35s var(--suave); }
+.grupo { font-size: 19px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: var(--texto-2); margin: 18px 0 6px 24px; }
+.ajuste {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 66px;
+  padding: 0 24px;
+  margin-bottom: 2px;
+  border-radius: 20px;
+  font-size: 27px;
+  font-weight: 500;
+}
+.ajuste .valor { color: var(--texto-2); font-weight: 500; white-space: nowrap; }
+.ajuste .valor small { font-size: 20px; margin-right: 8px; opacity: 0.8; }
+.ajuste.foco { background-color: var(--foco-fondo); color: var(--foco-texto); box-shadow: 0 10px 30px var(--sombra); }
+.ajuste.foco .valor { color: var(--foco-texto); }
+.ajuste input { font: inherit; color: inherit; background: transparent; border: none; text-align: right; width: 380px; outline: none; }
+.nota { position: absolute; left: 72px; bottom: 40px; font-size: 21px; color: var(--texto-2); }
+
+/* ---------- Aviso flotante ---------- */
+
+.aviso {
+  position: absolute;
+  right: 168px;   /* a la izquierda del botón de ajustes */
+  top: 54px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  height: 76px;
+  padding: 0 34px 0 28px;
+  border-radius: 38px;
+  font-size: 26px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(40px) scale(0.92);
+  transition: opacity 0.3s, transform 0.5s var(--muelle);
+}
+.aviso.visible { opacity: 1; transform: none; }
+.aviso svg { width: 34px; height: 34px; margin-right: 12px; }
+.aviso.visible svg { animation: girar 0.6s var(--muelle); }
+@keyframes girar { from { transform: rotate(-90deg) scale(0.5); } to { transform: none; } }
+
+#atenuador {
+  position: absolute;
+  left: 0; top: 0; width: 1920px; height: 1080px;
+  z-index: 30;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.8s;
+}
+
+/* ---------- Entrada al abrir la app ---------- */
+
+body.entrada .cabecera { opacity: 0; transform: translateY(16px); }
+body.entrada .dock, body.entrada .entradas { opacity: 0; transform: translateY(50px); }
+.cabecera, .dock, .entradas {
+  transition: opacity 0.7s var(--suave), transform 0.8s var(--suave);
+}
+.dock { transition-delay: 0.08s; }
+.entradas { transition-delay: 0.16s; }
+.cabecera.moviendose { opacity: 0; transition: opacity 0.4s; }

@@ -1,0 +1,11 @@
+TVLibre.ipk
+*.ipk
+__pycache__/
+.DS_Store
+.claude/settings.local.json
+build/
+.gradle/
+local.properties
+DerivedData/
+xcuserdata/
+*.apk
