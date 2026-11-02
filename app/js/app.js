@@ -86,6 +86,28 @@
   }
   function guardar() {
     try { localStorage.setItem('prefs', JSON.stringify(prefs)); } catch (e) {}
+    avisarMovil();
+  }
+
+  // ---------- La app del móvil ----------
+  // Al abrir TV Libre, el móvil manda su dirección ({movil: 'http://ip:puerto/'}). Mientras tenga la app abierta,
+  // se le cuenta cómo están las apps (favoritas, ocultas y orden) para que las enseñe igual que la TV.
+  var MOVIL_VALIDO = /^http:\/\/(10|172|192)\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{2,5}\/$/;   // solo la red de casa
+  var movil = null, ultimoEnvio = '';
+  try { movil = localStorage.getItem('movil'); } catch (e) {}
+
+  function avisarMovil(siempre) {
+    if (!movil || prefs.ocultas === null || !prefs.favoritas) return;   // aún sin la primera lista de apps
+    var datos = JSON.stringify({ favoritas: prefs.favoritas || [], ocultas: prefs.ocultas || [], orden: prefs.orden || [] });
+    if (datos === ultimoEnvio && !siempre) return;   // guardar() también se llama por ajustes que no son de apps
+    ultimoEnvio = datos;
+    try {
+      var x = new XMLHttpRequest();
+      x.open('POST', movil);
+      x.timeout = 3000;
+      x.setRequestHeader('Content-Type', 'text/plain');   // así no hay consulta previa de CORS
+      x.send(datos);
+    } catch (e) {}   // con la app del móvil cerrada no contesta nadie: no pasa nada
   }
 
   // ---------- Estado ----------
@@ -1318,7 +1340,8 @@
 
   // ---------- Órdenes desde el móvil ----------
   // La app del móvil abre TV Libre con parámetros (ssap://system.launcher/launch con params):
-  // {fondo: id} cambia el fondo, {tema: 'claro'|'oscuro'|'auto'}, {siguiente: true} pasa al siguiente.
+  // {fondo: id} cambia el fondo, {tema: 'claro'|'oscuro'|'auto'}, {siguiente: true} pasa al siguiente,
+  // {movil: url} dice adónde mandar cómo están las apps y {soloMovil: true} pide solo eso.
   function parametros() {
     var sistema = window.webOSSystem || window.PalmSystem;
     var p = sistema && sistema.launchParams;
@@ -1327,6 +1350,11 @@
   }
 
   function atenderParametros(p) {
+    if (typeof p.movil === 'string' && MOVIL_VALIDO.test(p.movil)) {
+      movil = p.movil;
+      try { localStorage.setItem('movil', movil); } catch (e) {}
+      avisarMovil(true);
+    }
     if (p.fondo && Fondos.buscar(p.fondo).id === p.fondo) {
       prefs.fondo = p.fondo; guardar(); aplicarFondo(); programarRotacion();
       aviso(Fondos.buscar(p.fondo).nombre, 'imagen');
@@ -1345,6 +1373,7 @@
     var d = e && e.detail;
     var p = d && typeof d === 'object' && Object.keys(d).length ? d : parametros();
     atenderParametros(p);
+    if (p.soloMovil) return;   // el móvil solo pregunta por las apps: la pantalla se queda como está
     var home = !p.fondo && !p.siguiente && !p.tema;
     if (panel === 'cajon') cerrarCajon();
     if (panel === 'agenda') cerrarAgenda();

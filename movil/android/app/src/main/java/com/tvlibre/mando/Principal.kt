@@ -256,7 +256,7 @@ class Principal : Activity() {
             }
         }
         columna.addView(cabecera())
-        columna.addView(segmentos(listOf("Mando", "Apps", "Fondos"), 0, 42) { mostrar(it) },
+        columna.addView(segmentos(listOf("Mando", "Apps", "Fondos"), 0, 42) { if (it == 1) tv.pedirDisposicion(); mostrar(it) },
             LinearLayout.LayoutParams(-1, 42.dp).apply { topMargin = 20.dp; bottomMargin = 16.dp })
         contenido = FrameLayout(this)
         columna.addView(contenido, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -334,7 +334,7 @@ class Principal : Activity() {
             tv.puedeEncender -> { encenderFondo.setColor(0x2E30D158); encenderIcono.imageTintList = ColorStateList.valueOf(VERDE) }
             else -> { encenderFondo.setColor(0x1AFFFFFF); encenderIcono.imageTintList = ColorStateList.valueOf(TEXTO_3) }
         }
-        if (pestana == 1 && contenido.childCount > 0 && contenido.getChildAt(0).tag != tv.apps.size) mostrar(1)
+        if (pestana == 1 && contenido.childCount > 0 && contenido.getChildAt(0).tag != tv.firmaApps) mostrar(1)
     }
 
     // ---------- Mando ----------
@@ -512,65 +512,125 @@ class Principal : Activity() {
 
     // ---------- Apps y entradas ----------
 
+    /** Como la pantalla de TV Libre: el dock de favoritas, debajo el resto de apps y al final las entradas. */
     private fun apps(): View {
-        val scroll = ScrollView(this).apply { tag = tv.apps.size; isVerticalScrollBarEnabled = false }
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, 12.dp) }
-        if (tv.entradas.isNotEmpty()) {
-            col.addView(titulo("Entradas").apply { setPadding(2.dp, 4.dp, 0, 12.dp) })
-            val chips = LinearLayout(this)
-            fun chip(res: Int, t: String, accion: () -> Unit) = chips.addView(LinearLayout(this).apply {
-                gravity = Gravity.CENTER_VERTICAL; setPadding(14.dp, 0, 18.dp, 0); background = vidrio(22f)
-                addView(icono(res, TEXTO_2), LinearLayout.LayoutParams(18.dp, 18.dp).apply { rightMargin = 8.dp })
-                addView(texto(t, 14f, 600))
-                pulsable(0.95f) { accion() }
-            }, LinearLayout.LayoutParams(-2, 44.dp).apply { rightMargin = 10.dp })
-            chip(R.drawable.ic_tv, "TV") { tv.abrir("com.webos.app.livetv") }
-            tv.entradas.forEach { e -> chip(R.drawable.ic_entrada, e.nombre) { tv.entrada(e.id) } }
-            col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chips) })
-        }
-        if (tv.apps.isNotEmpty()) {
-            col.addView(titulo("Apps").apply { if (tv.entradas.isEmpty()) setPadding(2.dp, 4.dp, 0, 12.dp) })
-            val rejilla = GridLayout(this).apply { columnCount = 4 }
-            val ancho = anchoUtil / 4
-            tv.apps.forEach { app ->
-                val celda = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
-                    setPadding(4.dp, 6.dp, 4.dp, 14.dp)
-                }
-                val color = app.color?.let { runCatching { Color.parseColor(it) }.getOrNull() }
-                val cara = FrameLayout(this).apply {
-                    background = GradientDrawable().apply {
-                        setColor(color ?: 0x24FFFFFF); cornerRadius = 18f.dp; setStroke(1.dp, 0x24FFFFFF)
-                    }
-                    clipToOutline = true
-                    if (color != null) elevation = 6f.dp
-                }
-                val inicial = texto(app.nombre.take(1), 26f, 700).apply { gravity = Gravity.CENTER }
-                cara.addView(inicial, FrameLayout.LayoutParams(-1, -1))
-                app.icono?.let { url ->
-                    val img = ImageView(this).apply { setPadding(11.dp, 11.dp, 11.dp, 11.dp) }
-                    cara.addView(img, FrameLayout.LayoutParams(-1, -1))
-                    cargar(url, img) { inicial.visibility = View.GONE }
-                }
-                celda.addView(cara, LinearLayout.LayoutParams(64.dp, 64.dp))
-                celda.addView(texto(app.nombre, 12f, 500, TEXTO_2).apply {
-                    maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(0, 8.dp, 0, 0)
-                }, LinearLayout.LayoutParams(-1, -2))
-                celda.pulsable(0.9f) { tv.abrir(app.id) }
-                rejilla.addView(celda, GridLayout.LayoutParams().apply { width = ancho })
-            }
-            col.addView(rejilla)
-        } else {
+        val scroll = ScrollView(this).apply { tag = tv.firmaApps; isVerticalScrollBarEnabled = false }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, 16.dp) }
+        scroll.addView(col)
+        if (tv.apps.isEmpty()) {
             // Sin apps todavía: un aviso centrado en vez de una pantalla vacía
             val vacio = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, 70.dp, 0, 0) }
             vacio.addView(icono(R.drawable.ic_tv, TEXTO_3), LinearLayout.LayoutParams(56.dp, 56.dp))
             vacio.addView(texto(if (tv.estado == TV.Estado.CONECTADA) "Cargando apps…" else "Conecta con la TV para ver sus apps",
                 15f, 500, TEXTO_2).apply { gravity = Gravity.CENTER; setPadding(0, 14.dp, 0, 0) })
             col.addView(vacio, LinearLayout.LayoutParams(-1, -2))
+            return scroll
         }
-        scroll.addView(col)
+        val (favoritas, resto) = tv.filas()
+        val comoLaTV = tv.disposicion != null
+
+        col.addView(seccion("Favoritas", comoLaTV, primera = true))
+        val dock = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(6.dp, 14.dp, 6.dp, 0)
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x2EFFFFFF, 0x17FFFFFF)).apply {
+                cornerRadius = 28f.dp; setStroke(1.dp, 0x33FFFFFF)
+            }
+        }
+        if (favoritas.isEmpty()) dock.addView(texto("No hay favoritas en la TV", 14f, 500, TEXTO_3).apply {
+            gravity = Gravity.CENTER; setPadding(0, 10.dp, 0, 24.dp)
+        }, LinearLayout.LayoutParams(-1, -2))
+        else dock.addView(rejillaApps(favoritas, anchoUtil - 12.dp, 64))
+        col.addView(dock, LinearLayout.LayoutParams(-1, -2))
+
+        if (resto.isNotEmpty()) {
+            col.addView(seccion("Otras apps"))
+            col.addView(rejillaApps(resto, anchoUtil, 58))
+        }
+
+        val entradas = listOf(EntradaTV("com.webos.app.livetv", "TV")) + tv.entradas
+        col.addView(seccion("Entradas"))
+        val rejilla = GridLayout(this).apply { columnCount = 2 }
+        val separacion = 10.dp
+        val ancho = (anchoUtil - separacion) / 2
+        entradas.forEachIndexed { i, e ->
+            val tarjeta = LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL; setPadding(10.dp, 0, 12.dp, 0); background = vidrio(20f, 0x1F, 0x2E)
+                val circuloIcono = FrameLayout(this@Principal).apply { background = circulo(0x26) }
+                circuloIcono.addView(icono(if (i == 0) R.drawable.ic_tv else R.drawable.ic_entrada), FrameLayout.LayoutParams(18.dp, 18.dp, Gravity.CENTER))
+                addView(circuloIcono, LinearLayout.LayoutParams(36.dp, 36.dp).apply { rightMargin = 10.dp })
+                addView(texto(e.nombre, 15f, 600).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+                pulsable(0.96f) { if (i == 0) tv.abrir(e.id) else tv.entrada(e.id) }
+            }
+            rejilla.addView(tarjeta, GridLayout.LayoutParams().apply {
+                width = ancho; height = 58.dp
+                setMargins(0, 0, if (i % 2 == 0) separacion else 0, separacion)
+            })
+        }
+        col.addView(rejilla)
+
+        col.addView(texto(
+            if (comoLaTV) "Las favoritas, el orden y las apps ocultas son los de la TV. Para cambiarlos, en la TV mantén OK sobre una app."
+            else "Abre TV Libre en la TV con la app abierta y aquí verás tus favoritas y apps ocultas tal como las tienes.",
+            12.5f, 400, TEXTO_3
+        ).apply { gravity = Gravity.CENTER; setPadding(12.dp, 14.dp, 12.dp, 0); setLineSpacing(3f.dp, 1f) }, LinearLayout.LayoutParams(-1, -2))
         return scroll
     }
+
+    /** Título de sección; con la TV sincronizada, la de favoritas lleva una etiqueta que lo dice. */
+    private fun seccion(t: String, comoLaTV: Boolean = false, primera: Boolean = false): View {
+        val fila = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(2.dp, if (primera) 4.dp else 24.dp, 0, 12.dp) }
+        fila.addView(texto(t, 21f, 700).apply { letterSpacing = -0.01f }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (comoLaTV) fila.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setPadding(8.dp, 0, 10.dp, 0); background = vidrio(12f, 0x1A, 0x24)
+            addView(icono(R.drawable.ic_check, VERDE), LinearLayout.LayoutParams(14.dp, 14.dp).apply { rightMargin = 5.dp })
+            addView(texto("Como en la TV", 12f, 600, TEXTO_2))
+        }, LinearLayout.LayoutParams(-2, 26.dp))
+        return fila
+    }
+
+    /** Rejilla de 4 columnas con el icono de cada app sobre su color, como las tarjetas del dock de la TV. */
+    private fun rejillaApps(lista: List<AppTV>, ancho: Int, tam: Int): View {
+        val rejilla = GridLayout(this).apply { columnCount = 4 }
+        lista.forEach { app ->
+            val celda = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(3.dp, 0, 3.dp, 16.dp)
+            }
+            val color = app.color?.let { runCatching { Color.parseColor(it) }.getOrNull() }
+            val cara = FrameLayout(this).apply {
+                background = GradientDrawable().apply {
+                    if (color != null) {
+                        // Un poco más claro arriba, como la luz de las tarjetas de la TV
+                        colors = intArrayOf(mezclar(color, Color.WHITE, 0.12f), color)
+                        orientation = GradientDrawable.Orientation.TOP_BOTTOM
+                    } else setColor(0x24FFFFFF)
+                    cornerRadius = (tam * 0.28f).dp; setStroke(1.dp, 0x29FFFFFF)
+                }
+                clipToOutline = true
+                if (color != null) elevation = 8f.dp
+            }
+            val inicial = texto(app.nombre.take(1), tam * 0.4f, 700).apply { gravity = Gravity.CENTER }
+            cara.addView(inicial, FrameLayout.LayoutParams(-1, -1))
+            app.icono?.let { url ->
+                val img = ImageView(this).apply { val m = (tam * 0.17f).toInt().dp; setPadding(m, m, m, m) }
+                cara.addView(img, FrameLayout.LayoutParams(-1, -1))
+                cargar(url, img) { inicial.visibility = View.GONE }
+            }
+            celda.addView(cara, LinearLayout.LayoutParams(tam.dp, tam.dp))
+            celda.addView(texto(app.nombre, 12f, 500, TEXTO_2).apply {
+                maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(0, 8.dp, 0, 0)
+            }, LinearLayout.LayoutParams(-1, -2))
+            celda.pulsable(0.9f) { tv.abrir(app) }
+            rejilla.addView(celda, GridLayout.LayoutParams().apply { width = ancho / 4 })
+        }
+        return rejilla
+    }
+
+    private fun mezclar(a: Int, b: Int, t: Float) = Color.rgb(
+        (Color.red(a) + (Color.red(b) - Color.red(a)) * t).toInt(),
+        (Color.green(a) + (Color.green(b) - Color.green(a)) * t).toInt(),
+        (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t).toInt()
+    )
 
     // ---------- Fondos ----------
 

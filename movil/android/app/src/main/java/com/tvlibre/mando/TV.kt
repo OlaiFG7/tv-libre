@@ -8,7 +8,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.NetworkInterface
+import java.net.ServerSocket
+import java.net.Socket
 import java.net.SocketTimeoutException
 import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
@@ -26,7 +31,14 @@ import java.util.concurrent.atomic.AtomicInteger
 
 const val ID_TV_LIBRE = "com.tvlibre.inicio"
 
-data class AppTV(val id: String, val nombre: String, val icono: String?, val color: String?)
+/** id: el de TV Libre (la app, o el acceso fijado); se abre con appId y params. */
+data class AppTV(val id: String, val nombre: String, val icono: String?, val color: String?, val appId: String = id, val params: JSONObject? = null)
+/** Cómo tiene las apps la pantalla de TV Libre (lo manda la TV, ver avisarMovil en app/js/app.js). */
+data class Disposicion(val favoritas: List<String>, val ocultas: List<String>, val orden: List<String>)
+
+private const val PUERTO_MOVIL = 8765
+// Las mismas que TV Libre oculta de fábrica mientras no se sepa cómo las tiene
+private val OCULTAS_DE_FABRICA = Regex("^(com\\.webos\\.|com\\.palm\\.|com\\.lge\\.)")
 data class EntradaTV(val id: String, val nombre: String)
 data class Fondo(val id: String, val nombre: String, val grupo: String, val miniatura: String?, val colores: List<String>)
 
@@ -43,6 +55,9 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
         private set
     var entradas: List<EntradaTV> = emptyList()
         private set
+    var disposicion: Disposicion? = null
+        private set
+    private var servidor: ServerSocket? = null
 
     private val red = Executors.newSingleThreadExecutor()
     private val principal = Handler(Looper.getMainLooper())
@@ -62,6 +77,8 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
         if (ip.isEmpty()) { cambiar(Estado.SIN_TV); return }
         desconectar()
         cambiar(Estado.CONECTANDO)
+        disposicion = prefs.getString("disposicion:$ip", null)?.let(::leerDisposicion)
+        escuchar()
         val destino = ip
         red.execute {
             try {
@@ -84,16 +101,17 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
     }
 
     fun desconectar() {
-        val o = ordenes; val b = botones
-        ordenes = null; botones = null
+        val o = ordenes; val b = botones; val s = servidor
+        ordenes = null; botones = null; servidor = null
         red.execute { o?.cerrar(); b?.cerrar() }
+        runCatching { s?.close() }
         pendientes.clear()
     }
 
     /** Borra la clave, la huella y la MAC guardadas: la próxima vez se vuelve a emparejar. */
     fun olvidar() {
         desconectar()
-        prefs.edit().remove("clave:$ip").remove("huella:$ip").remove("mac:$ip").remove("ip").apply()
+        prefs.edit().remove("clave:$ip").remove("huella:$ip").remove("mac:$ip").remove("disposicion:$ip").remove("ip").apply()
         ip = ""
         apps = emptyList(); entradas = emptyList()
         cambiar(Estado.SIN_TV)
@@ -118,6 +136,7 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
                     abrirBotones()
                     cargarListas()
                     guardarMAC()
+                    pedirDisposicion()
                     if (System.currentTimeMillis() < abrirHasta) {
                         abrirHasta = 0
                         principal.postDelayed({ inicio() }, 2500)   // que el sistema termine de arrancar antes
@@ -185,20 +204,30 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
         "https://www.youtube.com/tv#/search?q=" + java.net.URLEncoder.encode(texto, "UTF-8").replace("+", "%20")))
 
     /** El botón Home del móvil abre TV Libre, no el inicio de LG con anuncios. */
-    fun inicio() = abrir(ID_TV_LIBRE)
-    fun fondo(id: String) = abrir(ID_TV_LIBRE, JSONObject().put("fondo", id))
-    fun tema(tema: String) = abrir(ID_TV_LIBRE, JSONObject().put("tema", tema))
+    fun inicio() = abrir(ID_TV_LIBRE, conMovil(JSONObject()))
+    fun fondo(id: String) = abrir(ID_TV_LIBRE, conMovil(JSONObject().put("fondo", id)))
+    fun tema(tema: String) = abrir(ID_TV_LIBRE, conMovil(JSONObject().put("tema", tema)))
+    fun abrir(app: AppTV) = abrir(app.appId, app.params)
 
     private fun cargarListas() {
         pedir("ssap://com.webos.applicationManager/listLaunchPoints") { r ->
             val lista = r?.optJSONArray("launchPoints") ?: return@pedir
+            val vistos = HashSet<String>()
             apps = (0 until lista.length()).mapNotNull { i ->
                 val a = lista.getJSONObject(i)
-                val id = a.optString("id")
-                if (id.isEmpty() || id == ID_TV_LIBRE) return@mapNotNull null
+                val appId = a.optString("id")
+                if (appId.isEmpty() || appId == ID_TV_LIBRE) return@mapNotNull null
+                // Como separarAccesos en app/js/luna.js: el acceso principal de cada app se conoce por su id;
+                // los fijados (un vídeo de YouTube…), por su launchPointId, y se abren con sus params
+                val lp = a.optString("launchPointId")
+                val tipo = a.optString("lptype")
+                val esPrincipal = if (tipo.isNotEmpty()) tipo == "default" else (lp.isEmpty() || lp == appId || lp.endsWith("_default"))
+                val id = if (esPrincipal) appId else lp.ifEmpty { appId + ":" + a.optString("title") }
+                if (!vistos.add(id)) return@mapNotNull null
                 // Solo se pueden cargar los iconos que la TV sirve por http; si es una ruta interna, se usa la inicial
                 val icono = a.optString("largeIcon").ifEmpty { a.optString("icon") }
-                AppTV(id, a.optString("title", id), icono.takeIf { it.startsWith("http") }, a.optString("bgColor").ifEmpty { null })
+                AppTV(id, a.optString("title", id), icono.takeIf { it.startsWith("http") }, a.optString("bgColor").ifEmpty { null },
+                    appId, if (esPrincipal) null else a.optJSONObject("params"))
             }
             alCambiar()
         }
@@ -210,6 +239,89 @@ class TV(private val contexto: Context, private val alCambiar: () -> Unit) {
             }
             alCambiar()
         }
+    }
+
+    // ---------- Las apps como en TV Libre ----------
+
+    /** Favoritas y el resto, en el orden y sin las ocultas de la pantalla de TV Libre (ver ordenarApps y appsDeFila en app.js). */
+    fun filas(): Pair<List<AppTV>, List<AppTV>> {
+        val d = disposicion
+        val ocultas = d?.ocultas?.toSet() ?: apps.filter { OCULTAS_DE_FABRICA.containsMatchIn(it.id) }.map { it.id }.toSet()
+        val pos = d?.orden?.withIndex()?.associate { it.value to it.index } ?: emptyMap()
+        val ordenadas = apps.sortedBy { pos[it.id] ?: 1_000_000 }
+        val favIds = d?.favoritas ?: ordenadas.filter { it.id !in ocultas }.take(7).map { it.id }
+        val porId = ordenadas.associateBy { it.id }
+        val favoritas = favIds.mapNotNull { porId[it] }.filter { it.id !in ocultas }
+        val resto = ordenadas.filter { it.id !in favIds && it.id !in ocultas }
+        return favoritas to resto
+    }
+
+    /** Cambia cuando hay que volver a pintar la pestaña de apps. */
+    val firmaApps get() = "${apps.size}/${entradas.size}/${disposicion.hashCode()}"
+
+    private fun leerDisposicion(texto: String): Disposicion? {
+        val j = runCatching { JSONObject(texto) }.getOrNull() ?: return null
+        fun lista(n: String) = j.optJSONArray(n)?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+        return Disposicion(lista("favoritas"), lista("ocultas"), lista("orden"))
+    }
+
+    /** La dirección del móvil en la red de la TV, para que TV Libre le mande cómo tiene las apps. */
+    private fun direccionMovil(): String? {
+        if (servidor == null) return null
+        val red = ip.substringBeforeLast('.')
+        val propias = runCatching {
+            NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
+                .flatMap { it.inetAddresses.toList() }.filterIsInstance<Inet4Address>().filter { it.isSiteLocalAddress }
+                .mapNotNull { it.hostAddress }
+        }.getOrNull().orEmpty()
+        val propia = propias.firstOrNull { it.substringBeforeLast('.') == red } ?: propias.firstOrNull() ?: return null
+        return "http://$propia:$PUERTO_MOVIL/"
+    }
+
+    private fun conMovil(p: JSONObject) = p.apply { direccionMovil()?.let { put("movil", it) } }
+
+    /** Si TV Libre está delante, le pide que mande cómo tiene las apps (sin cambiar nada en la pantalla de la TV). */
+    fun pedirDisposicion() {
+        val yo = direccionMovil() ?: return
+        pedir("ssap://com.webos.applicationManager/getForegroundAppInfo") { r ->
+            if (r?.optString("appId") == ID_TV_LIBRE) abrir(ID_TV_LIBRE, JSONObject().put("movil", yo).put("soloMovil", true))
+        }
+    }
+
+    /** Un servidor HTTP mínimo, solo mientras la app está abierta, que solo acepta lo que manda la TV. */
+    private fun escuchar() {
+        val s = runCatching { ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(PUERTO_MOVIL)) } }.getOrNull() ?: return
+        servidor = s
+        Thread {
+            while (!s.isClosed) {
+                val c = runCatching { s.accept() }.getOrNull() ?: break
+                runCatching { c.soTimeout = 3000; atenderTV(c) }
+                runCatching { c.close() }
+            }
+        }.start()
+    }
+
+    private fun atenderTV(c: Socket) {
+        val entrada = c.getInputStream().buffered()
+        val cabecera = StringBuilder()
+        while (!cabecera.endsWith("\r\n\r\n") && cabecera.length < 8192) {
+            val b = entrada.read()
+            if (b < 0) return
+            cabecera.append(b.toChar())
+        }
+        val lineas = cabecera.lines()
+        val metodo = lineas.first().substringBefore(' ')
+        val largo = lineas.firstOrNull { it.startsWith("content-length:", true) }?.substringAfter(':')?.trim()?.toIntOrNull() ?: 0
+        val cuerpo = ByteArray(largo.coerceIn(0, 65536))
+        var leido = 0
+        while (leido < cuerpo.size) { val n = entrada.read(cuerpo, leido, cuerpo.size - leido); if (n < 0) break; leido += n }
+        c.getOutputStream().write(("HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\n" +
+            "Access-Control-Allow-Headers: Content-Type\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").toByteArray())
+        if (metodo != "POST" || c.inetAddress.hostAddress != ip) return
+        val texto = String(cuerpo, 0, leido, Charsets.UTF_8)
+        val d = leerDisposicion(texto) ?: return
+        prefs.edit().putString("disposicion:$ip", texto).apply()
+        principal.post { disposicion = d; alCambiar() }
     }
 
     // ---------- Encender (Wake-on-LAN) ----------
