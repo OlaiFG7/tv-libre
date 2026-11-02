@@ -10,7 +10,8 @@
     <!-- usesCleartextTraffic: el socket de botones de la TV y sus iconos van por http/ws en la red local -->
     <application
         android:label="TV Libre"
-        android:icon="@android:drawable/ic_menu_view"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Tema"
         android:usesCleartextTraffic="true"
         android:allowBackup="false">

@@ -1,23 +1,34 @@
 package com.tvlibre.mando
 
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
+import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.AlertDialog
+import android.app.Dialog
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.InputType
+import android.text.TextUtils
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.Window
+import android.view.WindowInsets
+import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -27,9 +38,20 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import java.net.URL
 import java.util.concurrent.Executors
 import kotlin.math.abs
+import kotlin.math.max
+
+// Colores al estilo de iOS: blanco con transparencias sobre la foto difuminada
+private val TEXTO = Color.WHITE
+private val TEXTO_2 = 0xB3FFFFFF.toInt()
+private val TEXTO_3 = 0x73FFFFFF.toInt()
+private val VERDE = 0xFF30D158.toInt()
+private val AMARILLO = 0xFFFFD60A.toInt()
+private val ROJO = 0xFFFF453A.toInt()
+private val AZUL = 0xFF0A84FF.toInt()
 
 /**
  * Mando de TV Libre para Android, al estilo del mando de Apple TV: el fondo de la TV difuminado detrás,
@@ -41,19 +63,24 @@ class Principal : Activity() {
     private lateinit var fondoImagen: ImageView
     private lateinit var estadoTexto: TextView
     private lateinit var estadoPunto: View
+    private lateinit var encenderFondo: GradientDrawable
+    private lateinit var encenderIcono: ImageView
     private lateinit var contenido: FrameLayout
-    private val pestanas = mutableListOf<TextView>()
+    private var latido: ObjectAnimator? = null
     private var pestana = 0
     private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
     private val descargas = Executors.newFixedThreadPool(3)
     private val imagenes = HashMap<String, Bitmap>()
+    private val tarjetas = HashMap<String, Pair<GradientDrawable, View>>()   // fondo → (borde, marca de elegido)
 
     private val Int.dp get() = (this * resources.displayMetrics.density).toInt()
+    private val Float.dp get() = this * resources.displayMetrics.density
+    private val anchoUtil get() = resources.displayMetrics.widthPixels - 40.dp
 
     override fun onCreate(estado: Bundle?) {
         super.onCreate(estado)
         tv = TV(this) { refrescar() }
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        pantallaCompleta()
         setContentView(construir())
         ponerFondo(prefs.getString("fondo", "montanas-amanecer")!!)
         mostrar(0)
@@ -64,6 +91,147 @@ class Principal : Activity() {
     override fun onResume() { super.onResume(); if (tv.ip.isNotEmpty()) tv.conectar() }
     override fun onPause() { super.onPause(); tv.desconectar() }
 
+    @Suppress("DEPRECATION")
+    private fun pantallaCompleta() {
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+    }
+
+    /** Lo que ocupan arriba la barra de estado y abajo la de navegación (o el teclado). */
+    @Suppress("DEPRECATION")
+    private fun margenes(ins: WindowInsets): Pair<Int, Int> =
+        if (Build.VERSION.SDK_INT >= 30) ins.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime()).let { it.top to it.bottom }
+        else ins.systemWindowInsetTop to ins.systemWindowInsetBottom
+
+    // ---------- Piezas ----------
+
+    private fun fuente(peso: Int): Typeface =
+        if (Build.VERSION.SDK_INT >= 28) Typeface.create(Typeface.DEFAULT, peso, false)
+        else Typeface.create(if (peso >= 500) "sans-serif-medium" else "sans-serif", if (peso >= 700) Typeface.BOLD else Typeface.NORMAL)
+
+    private fun texto(t: String, tam: Float = 15f, peso: Int = 400, color: Int = TEXTO) = TextView(this).apply {
+        text = t; textSize = tam; setTextColor(color); typeface = fuente(peso); includeFontPadding = false
+    }
+
+    private fun icono(res: Int, color: Int = TEXTO) = ImageView(this).apply {
+        setImageResource(res); imageTintList = ColorStateList.valueOf(color)
+    }
+
+    private fun vidrio(radio: Float, alfa: Int = 0x1F, borde: Int = 0x2E) = GradientDrawable().apply {
+        setColor(Color.argb(alfa, 255, 255, 255)); cornerRadius = radio.dp; setStroke(1.dp, Color.argb(borde, 255, 255, 255))
+    }
+
+    private fun circulo(alfa: Int = 0x24) = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL; setColor(Color.argb(alfa, 255, 255, 255)); setStroke(1.dp, 0x2EFFFFFF)
+    }
+
+    private fun pulso(v: View) = v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+
+    /** Se hunde un poco al tocarlo y rebota al soltar, como los botones de iOS. */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun <T : View> T.pulsable(escala: Float = 0.92f, accion: () -> Unit): T {
+        setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> v.animate().scaleX(escala).scaleY(escala).setDuration(90).setInterpolator(DecelerateInterpolator()).start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(OvershootInterpolator(3f)).start()
+            }
+            false
+        }
+        setOnClickListener { pulso(it); accion() }
+        return this
+    }
+
+    private fun botonRedondo(res: Int, tam: Int, nombre: String, accion: () -> Unit) = FrameLayout(this).apply {
+        background = circulo()
+        contentDescription = nombre
+        addView(icono(res), FrameLayout.LayoutParams((tam * 0.38f).toInt().dp, (tam * 0.38f).toInt().dp, Gravity.CENTER))
+        pulsable { accion() }
+    }
+
+    /** Botón ancho de las hojas: el principal, blanco relleno; los demás, de vidrio. */
+    private fun boton(t: String, principal: Boolean = false, color: Int = TEXTO, accion: () -> Unit) =
+        texto(t, 16f, 600, if (principal) Color.BLACK else color).apply {
+            gravity = Gravity.CENTER
+            background = if (principal) GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = 26f.dp } else vidrio(26f, 0x1F, 0x24)
+            pulsable(0.96f) { accion() }
+        }
+
+    private fun titulo(t: String) = texto(t, 21f, 700).apply { letterSpacing = -0.01f; setPadding(2.dp, 22.dp, 0, 12.dp) }
+
+    /** Control segmentado con la pastilla que se desliza hasta la opción elegida. */
+    private fun segmentos(opciones: List<String>, elegido: Int, alto: Int, alElegir: (Int) -> Unit): View {
+        val marco = FrameLayout(this).apply { background = vidrio(alto / 2f, 0x1A, 0x24); setPadding(3.dp, 3.dp, 3.dp, 3.dp) }
+        val ancho = (anchoUtil - 6.dp) / opciones.size
+        val pastilla = View(this).apply {
+            background = GradientDrawable().apply { setColor(0x3DFFFFFF); cornerRadius = (alto / 2f - 3f).dp }
+            translationX = (elegido * ancho).toFloat()
+        }
+        marco.addView(pastilla, FrameLayout.LayoutParams(ancho, -1))
+        val fila = LinearLayout(this)
+        val etiquetas = opciones.mapIndexed { i, nombre ->
+            texto(nombre, 14f, 600, if (i == elegido) TEXTO else TEXTO_2).apply { gravity = Gravity.CENTER }
+        }
+        etiquetas.forEachIndexed { i, t ->
+            t.setOnClickListener {
+                pulso(it)
+                pastilla.animate().translationX((i * ancho).toFloat()).setDuration(320).setInterpolator(OvershootInterpolator(0.9f)).start()
+                etiquetas.forEachIndexed { j, o -> o.setTextColor(if (j == i) TEXTO else TEXTO_2) }
+                alElegir(i)
+            }
+            fila.addView(t, LinearLayout.LayoutParams(0, -1, 1f))
+        }
+        marco.addView(fila, FrameLayout.LayoutParams(-1, -1))
+        return marco
+    }
+
+    private fun campoTexto(pista: String, res: Int): Pair<View, EditText> {
+        val marco = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(16.dp, 0, 16.dp, 0); background = vidrio(16f, 0x1A, 0x2E) }
+        marco.addView(icono(res, TEXTO_3), LinearLayout.LayoutParams(20.dp, 20.dp).apply { rightMargin = 12.dp })
+        val campo = EditText(this).apply {
+            hint = pista; setHintTextColor(TEXTO_3); setTextColor(TEXTO); textSize = 17f; typeface = fuente(500)
+            background = null; isSingleLine = true; setPadding(0, 0, 0, 0)
+        }
+        marco.addView(campo, LinearLayout.LayoutParams(0, -1, 1f))
+        return marco to campo
+    }
+
+    /** Hoja que sube desde abajo, de vidrio oscuro (en Android 12+ con el fondo difuminado detrás). */
+    private fun hoja(titulo: String, cuerpo: View): Dialog {
+        val d = Dialog(this)
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor(0xEB1C1C20.toInt())
+                val r = 28f.dp
+                cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+            }
+            setPadding(22.dp, 10.dp, 22.dp, 24.dp)
+            setOnApplyWindowInsetsListener { v, ins -> v.setPadding(22.dp, 10.dp, 22.dp, 24.dp + margenes(ins).second); ins }
+        }
+        panel.addView(View(this).apply { background = GradientDrawable().apply { setColor(0x4DFFFFFF); cornerRadius = 3f.dp } },
+            LinearLayout.LayoutParams(36.dp, 5.dp).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = 16.dp })
+        panel.addView(texto(titulo, 24f, 700).apply { letterSpacing = -0.01f },
+            LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = 18.dp })
+        panel.addView(cuerpo)
+        d.setContentView(panel)
+        d.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setLayout(-1, -2)
+            setGravity(Gravity.BOTTOM)
+            setWindowAnimations(android.R.style.Animation_InputMethod)
+            setDimAmount(0.5f)
+            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            if (Build.VERSION.SDK_INT >= 31) {
+                addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                attributes = attributes.apply { blurBehindRadius = 40.dp }
+            }
+        }
+        return d
+    }
+
     // ---------- Estructura ----------
 
     private fun construir(): View {
@@ -71,95 +239,101 @@ class Principal : Activity() {
         fondoImagen = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             if (Build.VERSION.SDK_INT >= 31) setRenderEffect(RenderEffect.createBlurEffect(90f, 90f, Shader.TileMode.CLAMP))
-            alpha = 0.8f
+            alpha = 0.85f
         }
         raiz.addView(fondoImagen, FrameLayout.LayoutParams(-1, -1))
         raiz.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x22000000, 0x99000000.toInt()))
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x40000000, 0x59000000, 0xBF000000.toInt()))
         }, FrameLayout.LayoutParams(-1, -1))
 
         val columna = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(20.dp, 44.dp, 20.dp, 24.dp)
+            setPadding(20.dp, 48.dp, 20.dp, 24.dp)
+            setOnApplyWindowInsetsListener { v, ins ->
+                val (arriba, abajo) = margenes(ins)
+                v.setPadding(20.dp, arriba + 14.dp, 20.dp, abajo + 18.dp); ins
+            }
         }
         columna.addView(cabecera())
-        columna.addView(selector(), LinearLayout.LayoutParams(-1, 40.dp).apply { topMargin = 14.dp; bottomMargin = 14.dp })
+        columna.addView(segmentos(listOf("Mando", "Apps", "Fondos"), 0, 42) { mostrar(it) },
+            LinearLayout.LayoutParams(-1, 42.dp).apply { topMargin = 20.dp; bottomMargin = 16.dp })
         contenido = FrameLayout(this)
         columna.addView(contenido, LinearLayout.LayoutParams(-1, 0, 1f))
         raiz.addView(columna, FrameLayout.LayoutParams(-1, -1))
         return raiz
     }
 
-    private fun vidrio(radio: Int, alfa: Int = 0x26) = GradientDrawable().apply {
-        setColor(Color.argb(alfa, 255, 255, 255))
-        cornerRadius = radio.dp.toFloat()
-        setStroke(1.dp, Color.argb(0x40, 255, 255, 255))
-    }
-
-    private fun texto(t: String, tam: Float = 15f, negrita: Boolean = false, color: Int = Color.WHITE) = TextView(this).apply {
-        text = t; textSize = tam; setTextColor(color)
-        if (negrita) typeface = Typeface.DEFAULT_BOLD
-    }
-
     private fun cabecera(): View {
         val fila = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        estadoPunto = View(this).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.GRAY) } }
-        fila.addView(estadoPunto, LinearLayout.LayoutParams(9.dp, 9.dp).apply { rightMargin = 10.dp })
         val textos = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        textos.addView(texto("TV Libre", 18f, true))
-        estadoTexto = texto("", 13f, color = 0xAAFFFFFF.toInt()).apply { maxLines = 1 }
-        textos.addView(estadoTexto)
-        fila.addView(textos, LinearLayout.LayoutParams(0, -2, 1f))
-        fila.setOnClickListener { elegirTV() }
-        fila.addView(redondo("⏻", 46) {
-            if (tv.estado == TV.Estado.CONECTADA) tv.apagar() else if (tv.puedeEncender) tv.encender()
-        })
-        return fila
-    }
+        textos.addView(texto("TV Libre", 32f, 700).apply { letterSpacing = -0.02f })
 
-    private fun selector(): View {
-        val fila = LinearLayout(this).apply { background = vidrio(20); setPadding(3.dp, 3.dp, 3.dp, 3.dp) }
-        listOf("Mando", "Apps", "Fondos").forEachIndexed { i, nombre ->
-            val t = texto(nombre, 14f, true).apply { gravity = Gravity.CENTER; setOnClickListener { pulso(it); mostrar(i) } }
-            pestanas.add(t)
-            fila.addView(t, LinearLayout.LayoutParams(0, -1, 1f))
+        // La pastilla de estado: punto de color, IP o aviso, y una flecha que invita a cambiar de TV
+        val estado = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setPadding(11.dp, 0, 8.dp, 0); background = vidrio(15f, 0x1A, 0x24)
         }
+        estadoPunto = View(this).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.GRAY) } }
+        estado.addView(estadoPunto, LinearLayout.LayoutParams(8.dp, 8.dp).apply { rightMargin = 8.dp })
+        estadoTexto = texto("", 13f, 500, TEXTO_2).apply {
+            maxLines = 1; ellipsize = TextUtils.TruncateAt.END; maxWidth = resources.displayMetrics.widthPixels - 150.dp
+        }
+        estado.addView(estadoTexto)
+        estado.addView(icono(R.drawable.ic_abajo, TEXTO_3), LinearLayout.LayoutParams(18.dp, 18.dp).apply { leftMargin = 2.dp })
+        estado.pulsable(0.96f) { elegirTV() }
+        textos.addView(estado, LinearLayout.LayoutParams(-2, 30.dp).apply { topMargin = 8.dp })
+        fila.addView(textos, LinearLayout.LayoutParams(0, -2, 1f))
+
+        encenderFondo = circulo()
+        val encender = FrameLayout(this).apply { background = encenderFondo; contentDescription = "Encender o apagar la TV" }
+        encenderIcono = icono(R.drawable.ic_encender)
+        encender.addView(encenderIcono, FrameLayout.LayoutParams(24.dp, 24.dp, Gravity.CENTER))
+        encender.pulsable {
+            when {
+                tv.estado == TV.Estado.CONECTADA -> tv.apagar()
+                tv.puedeEncender -> { tv.encender(); estadoTexto.text = "Encendiendo la TV…" }
+                else -> Toast.makeText(this, "Conecta una vez con la TV encendida para poder encenderla desde aquí", Toast.LENGTH_LONG).show()
+            }
+        }
+        fila.addView(encender, LinearLayout.LayoutParams(54.dp, 54.dp))
         return fila
     }
 
     private fun mostrar(i: Int) {
+        val antes = pestana
         pestana = i
-        pestanas.forEachIndexed { j, t ->
-            t.background = if (j == i) GradientDrawable().apply { setColor(0x40FFFFFF); cornerRadius = 17.dp.toFloat() } else null
-        }
         contenido.removeAllViews()
         val vista = when (i) { 0 -> mando(); 1 -> apps(); else -> fondos() }
         vista.alpha = 0f
+        vista.translationX = when { i > antes -> 28f.dp; i < antes -> -28f.dp; else -> 0f }
         contenido.addView(vista, FrameLayout.LayoutParams(-1, -1))
-        vista.animate().alpha(1f).setDuration(220).start()
+        vista.animate().alpha(1f).translationX(0f).setDuration(280).setInterpolator(DecelerateInterpolator(2f)).start()
         refrescar()
     }
 
     private fun refrescar() {
         val (color, t) = when (tv.estado) {
-            TV.Estado.SIN_TV -> Color.GRAY to "Toca para elegir la TV"
-            TV.Estado.CONECTANDO -> 0xFFFFD60A.toInt() to "Conectando con ${tv.ip}…"
-            TV.Estado.ESPERANDO_PERMISO -> 0xFFFFD60A.toInt() to "Acepta el aviso en la TV"
-            TV.Estado.CONECTADA -> 0xFF32D74B.toInt() to tv.ip
-            TV.Estado.ERROR -> 0xFFFF453A.toInt() to tv.error
+            TV.Estado.SIN_TV -> Color.GRAY to "Elegir televisor"
+            TV.Estado.CONECTANDO -> AMARILLO to "Conectando con ${tv.ip}…"
+            TV.Estado.ESPERANDO_PERMISO -> AMARILLO to "Acepta el aviso en la TV"
+            TV.Estado.CONECTADA -> VERDE to "Conectada · ${tv.ip}"
+            TV.Estado.ERROR -> ROJO to tv.error
         }
         (estadoPunto.background as GradientDrawable).setColor(color)
         estadoTexto.text = t
+        // El punto late mientras se espera a la TV
+        val esperando = tv.estado == TV.Estado.CONECTANDO || tv.estado == TV.Estado.ESPERANDO_PERMISO
+        if (esperando && latido == null) {
+            latido = ObjectAnimator.ofFloat(estadoPunto, View.ALPHA, 1f, 0.25f).apply {
+                duration = 700; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE; start()
+            }
+        } else if (!esperando) { latido?.cancel(); latido = null; estadoPunto.alpha = 1f }
+        // Encender: rojo si se puede apagar, verde si se puede encender, apagado si aún no se sabe su MAC
+        when {
+            tv.estado == TV.Estado.CONECTADA -> { encenderFondo.setColor(0x38FF453A); encenderIcono.imageTintList = ColorStateList.valueOf(0xFFFF6B61.toInt()) }
+            tv.puedeEncender -> { encenderFondo.setColor(0x2E30D158); encenderIcono.imageTintList = ColorStateList.valueOf(VERDE) }
+            else -> { encenderFondo.setColor(0x1AFFFFFF); encenderIcono.imageTintList = ColorStateList.valueOf(TEXTO_3) }
+        }
         if (pestana == 1 && contenido.childCount > 0 && contenido.getChildAt(0).tag != tv.apps.size) mostrar(1)
-    }
-
-    private fun pulso(v: View) = v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-
-    private fun redondo(simbolo: String, tam: Int, accion: () -> Unit) = texto(simbolo, 20f, true).apply {
-        gravity = Gravity.CENTER
-        background = vidrio(tam / 2).apply { shape = GradientDrawable.OVAL }
-        layoutParams = LinearLayout.LayoutParams(tam.dp, tam.dp)
-        setOnClickListener { pulso(it); accion() }
     }
 
     // ---------- Mando ----------
@@ -168,60 +342,134 @@ class Principal : Activity() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(trackpad(), LinearLayout.LayoutParams(-1, 0, 1f))
 
-        val fila = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, 16.dp, 0, 0) }
-        fun hueco() = View(this).also { fila.addView(it, LinearLayout.LayoutParams(0, 1, 1f)) }
-        fila.addView(redondo("‹", 58) { tv.boton("BACK") }); hueco()
-        fila.addView(redondo("⌂", 58) { tv.inicio() }); hueco()           // TV Libre, no el inicio de LG
-        fila.addView(redondo("⌨", 58) { teclado() }); hueco()
-        fila.addView(redondo("⏯", 58) { tv.boton("PLAY") }); hueco()
-        val volumen = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        for ((s, subir) in listOf("+" to true, "−" to false)) {
-            volumen.addView(texto(s, 18f, true).apply {
-                gravity = Gravity.CENTER; background = vidrio(13)
-                setOnClickListener { pulso(it); tv.volumen(subir) }
-            }, LinearLayout.LayoutParams(58.dp, 26.dp).apply { topMargin = if (subir) 0 else 6.dp })
+        // Como el mando del Apple TV: dos columnas de botones redondos y el volumen en una pastilla alta
+        val tam = 66
+        val bloque = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(6.dp, 20.dp, 6.dp, 0) }
+        fun hueco() = bloque.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        fun columna(vararg botones: View) = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            botones.forEachIndexed { i, b -> addView(b, LinearLayout.LayoutParams(tam.dp, tam.dp).apply { if (i > 0) topMargin = 14.dp }) }
         }
-        fila.addView(volumen)
-        col.addView(fila)
+        bloque.addView(columna(
+            botonRedondo(R.drawable.ic_atras, tam, "Atrás") { tv.boton("BACK") },
+            botonRedondo(R.drawable.ic_teclado, tam, "Teclado") { teclado() }
+        )); hueco()
+        bloque.addView(columna(
+            botonRedondo(R.drawable.ic_inicio, tam, "TV Libre") { tv.inicio() },   // TV Libre, no el inicio de LG
+            botonRedondo(R.drawable.ic_play_pausa, tam, "Reproducir o pausar") { tv.boton("PLAY") }
+        )); hueco()
+        bloque.addView(volumen(), LinearLayout.LayoutParams(tam.dp, (tam * 2 + 14).dp))
+        col.addView(bloque)
 
-        val colores = LinearLayout(this).apply { setPadding(0, 14.dp, 0, 0) }
-        for ((nombre, color) in listOf("RED" to 0xFFFF453A, "GREEN" to 0xFF32D74B, "YELLOW" to 0xFFFFD60A, "BLUE" to 0xFF0A84FF)) {
-            val boton = FrameLayout(this).apply { background = vidrio(19); setOnClickListener { pulso(it); tv.boton(nombre) } }
+        val colores = LinearLayout(this).apply { setPadding(0, 20.dp, 0, 0) }
+        val lista = listOf("RED" to 0xFFFF453A, "GREEN" to 0xFF30D158, "YELLOW" to 0xFFFFD60A, "BLUE" to 0xFF0A84FF)
+        lista.forEachIndexed { i, (nombre, color) ->
+            val boton = FrameLayout(this).apply { background = vidrio(20f, 0x1A, 0x24); contentDescription = "Botón $nombre" }
             boton.addView(View(this).apply {
-                background = GradientDrawable().apply { setColor(color.toInt()); cornerRadius = 5.dp.toFloat() }
-            }, FrameLayout.LayoutParams(-1, 10.dp, Gravity.CENTER).apply { leftMargin = 12.dp; rightMargin = 12.dp })
-            colores.addView(boton, LinearLayout.LayoutParams(0, 38.dp, 1f).apply { rightMargin = 10.dp })
+                background = GradientDrawable().apply { setColor(color.toInt()); cornerRadius = 4f.dp }
+            }, FrameLayout.LayoutParams(26.dp, 8.dp, Gravity.CENTER))
+            boton.pulsable(0.94f) { tv.boton(nombre) }
+            colores.addView(boton, LinearLayout.LayoutParams(0, 40.dp, 1f).apply { if (i < lista.size - 1) rightMargin = 10.dp })
         }
-        colores.addView(texto("🔇", 15f).apply {
-            gravity = Gravity.CENTER; background = vidrio(19)
-            setOnClickListener { pulso(it); tv.boton("MUTE") }
-        }, LinearLayout.LayoutParams(48.dp, 38.dp))
         col.addView(colores)
         return col
     }
 
-    /** Deslizar = flecha en la dirección dominante; tocar = OK. */
+    private fun volumen(): View {
+        val pastilla = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = vidrio(33f, 0x24, 0x2E) }
+        fun parte(res: Int, tam: Int, nombre: String, accion: () -> Unit) = FrameLayout(this).apply {
+            contentDescription = nombre
+            addView(icono(res, if (tam < 22) TEXTO_2 else TEXTO), FrameLayout.LayoutParams(tam.dp, tam.dp, Gravity.CENTER))
+            pulsable(0.85f) { accion() }
+        }
+        pastilla.addView(parte(R.drawable.ic_mas, 24, "Subir volumen") { tv.volumen(true) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        pastilla.addView(parte(R.drawable.ic_silencio, 18, "Silencio") { tv.boton("MUTE") }, LinearLayout.LayoutParams(-1, 0, 0.7f))
+        pastilla.addView(parte(R.drawable.ic_menos, 24, "Bajar volumen") { tv.volumen(false) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        return pastilla
+    }
+
+    /**
+     * Deslizar = flechas: una cada vez que el dedo recorre un tramo, así un deslizamiento largo avanza varias
+     * casillas. Tocar sin moverse = OK. Un brillo sigue al dedo y la flecha de esa dirección se ilumina.
+     */
+    @SuppressLint("ClickableViewAccessibility")
     private fun trackpad(): View {
-        val panel = FrameLayout(this).apply { background = vidrio(32, 0x1F) }
-        panel.addView(texto("Desliza para moverte · toca para OK", 13f, color = 0x88FFFFFF.toInt()),
-            FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = 18.dp })
-        var x0 = 0f; var y0 = 0f
+        val panel = FrameLayout(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x2BFFFFFF, 0x12FFFFFF)).apply {
+                cornerRadius = 36f.dp; setStroke(1.dp, 0x33FFFFFF)
+            }
+            clipToOutline = true
+            contentDescription = "Trackpad: desliza para moverte, toca para OK"
+        }
+        val brillo = View(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL; gradientType = GradientDrawable.RADIAL_GRADIENT; gradientRadius = 75f.dp
+                colors = intArrayOf(0x5CFFFFFF, 0x00FFFFFF)
+            }
+            alpha = 0f
+        }
+        panel.addView(brillo, FrameLayout.LayoutParams(150.dp, 150.dp))
+        val flechas = HashMap<String, ImageView>()
+        for ((nombre, res, sitio) in listOf(
+            Triple("UP", R.drawable.ic_arriba, Gravity.TOP or Gravity.CENTER_HORIZONTAL),
+            Triple("DOWN", R.drawable.ic_abajo, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL),
+            Triple("LEFT", R.drawable.ic_izquierda, Gravity.START or Gravity.CENTER_VERTICAL),
+            Triple("RIGHT", R.drawable.ic_derecha, Gravity.END or Gravity.CENTER_VERTICAL)
+        )) {
+            val f = icono(res).apply { alpha = 0.2f }
+            panel.addView(f, FrameLayout.LayoutParams(28.dp, 28.dp, sitio).apply { setMargins(14.dp, 14.dp, 14.dp, 14.dp) })
+            flechas[nombre] = f
+        }
+        val pista = texto("Desliza para moverte\nToca para OK", 14f, 500, TEXTO_3).apply { gravity = Gravity.CENTER; setLineSpacing(4f.dp, 1f) }
+        panel.addView(pista, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+
+        fun destello(nombre: String) {
+            val f = flechas[nombre] ?: return
+            f.animate().cancel(); f.alpha = 1f; f.scaleX = 1.25f; f.scaleY = 1.25f
+            f.animate().alpha(0.2f).scaleX(1f).scaleY(1f).setDuration(420).start()
+        }
+        fun direccion(dx: Float, dy: Float) = if (abs(dx) > abs(dy)) (if (dx > 0) "RIGHT" else "LEFT") else (if (dy > 0) "DOWN" else "UP")
+        fun soltar() {
+            brillo.animate().alpha(0f).setDuration(260).start()
+            pista.animate().alpha(1f).setDuration(400).setStartDelay(600).start()
+        }
+
+        var x0 = 0f; var y0 = 0f; var xInicio = 0f; var yInicio = 0f; var movido = false
+        val tramo = 46.dp
         panel.setOnTouchListener { v, e ->
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { x0 = e.x; y0 = e.y; v.animate().scaleX(0.98f).scaleY(0.98f).setDuration(120).start() }
-                MotionEvent.ACTION_UP -> {
-                    v.animate().scaleX(1f).scaleY(1f).setDuration(200).start()
+                MotionEvent.ACTION_DOWN -> {
+                    x0 = e.x; y0 = e.y; xInicio = e.x; yInicio = e.y; movido = false
+                    brillo.translationX = e.x - 75.dp; brillo.translationY = e.y - 75.dp
+                    brillo.animate().alpha(1f).setDuration(120).start()
+                    pista.animate().alpha(0f).setDuration(150).setStartDelay(0).start()
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    brillo.translationX = e.x - 75.dp; brillo.translationY = e.y - 75.dp
                     val dx = e.x - x0; val dy = e.y - y0
-                    if (abs(dx) < 18.dp && abs(dy) < 18.dp) {
-                        v.performHapticFeedback(HapticFeedbackConstants.CONFIRM.takeIf { Build.VERSION.SDK_INT >= 30 } ?: HapticFeedbackConstants.VIRTUAL_KEY)
-                        tv.boton("ENTER")
-                    } else {
-                        pulso(v)
-                        tv.boton(if (abs(dx) > abs(dy)) (if (dx > 0) "RIGHT" else "LEFT") else (if (dy > 0) "DOWN" else "UP"))
+                    if (max(abs(dx), abs(dy)) > tramo) {
+                        val d = direccion(dx, dy)
+                        pulso(v); tv.boton(d); destello(d)
+                        x0 = e.x; y0 = e.y; movido = true
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    soltar()
+                    val dx = e.x - xInicio; val dy = e.y - yInicio
+                    if (!movido) {
+                        if (abs(dx) < 14.dp && abs(dy) < 14.dp) {
+                            v.performHapticFeedback(if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY)
+                            tv.boton("ENTER")
+                            v.animate().scaleX(0.97f).scaleY(0.97f).setDuration(70)
+                                .withEndAction { v.animate().scaleX(1f).scaleY(1f).setDuration(240).setInterpolator(OvershootInterpolator(3f)).start() }.start()
+                        } else {
+                            val d = direccion(dx, dy)
+                            pulso(v); tv.boton(d); destello(d)
+                        }
                     }
                     v.performClick()
                 }
-                MotionEvent.ACTION_CANCEL -> v.animate().scaleX(1f).scaleY(1f).setDuration(200).start()
+                MotionEvent.ACTION_CANCEL -> soltar()
             }
             true
         }
@@ -231,78 +479,94 @@ class Principal : Activity() {
     /** Lo que se escribe aparece en el campo de texto que tenga el foco en la TV. */
     private fun teclado() {
         var ultimo = ""
-        val campo = EditText(this).apply {
-            hint = "Busca o escribe…"
-            imeOptions = EditorInfo.IME_ACTION_SEARCH
-            inputType = InputType.TYPE_CLASS_TEXT
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-                override fun afterTextChanged(s: Editable?) {
-                    val nuevo = s.toString()
-                    // Solo se manda la diferencia: lo añadido o lo borrado
-                    if (nuevo.startsWith(ultimo)) tv.escribir(nuevo.substring(ultimo.length))
-                    else { tv.borrar(ultimo.length); tv.escribir(nuevo) }
-                    ultimo = nuevo
-                }
-            })
-            setOnEditorActionListener { _, _, _ -> tv.intro(); ultimo = ""; setText(""); true }
-        }
-        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setTitle("Escribir en la TV").setView(FrameLayout(this).apply { setPadding(20.dp, 8.dp, 20.dp, 0); addView(campo) })
-            .setPositiveButton("Cerrar", null)
-            .setNeutralButton("Buscar en YouTube") { _, _ ->
-                val q = campo.text.toString().trim()
-                if (q.isNotEmpty()) tv.buscarEnYouTube(q)
+        val cuerpo = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val (marco, campo) = campoTexto("Escribe en la TV…", R.drawable.ic_teclado)
+        campo.imeOptions = EditorInfo.IME_ACTION_SEARCH
+        campo.inputType = InputType.TYPE_CLASS_TEXT
+        campo.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                val nuevo = s.toString()
+                // Solo se manda la diferencia: lo añadido o lo borrado
+                if (nuevo.startsWith(ultimo)) tv.escribir(nuevo.substring(ultimo.length))
+                else { tv.borrar(ultimo.length); tv.escribir(nuevo) }
+                ultimo = nuevo
             }
-            .show()
+        })
+        campo.setOnEditorActionListener { _, _, _ -> tv.intro(); ultimo = ""; campo.setText(""); true }
+        cuerpo.addView(marco, LinearLayout.LayoutParams(-1, 56.dp))
+        val d = hoja("Escribir en la TV", cuerpo)
+        val botones = LinearLayout(this).apply { setPadding(0, 16.dp, 0, 0) }
+        botones.addView(boton("Intro") { tv.intro(); ultimo = ""; campo.setText("") }, LinearLayout.LayoutParams(0, 52.dp, 1f).apply { rightMargin = 10.dp })
+        botones.addView(boton("Buscar en YouTube", principal = true) {
+            val q = campo.text.toString().trim()
+            if (q.isNotEmpty()) { tv.buscarEnYouTube(q); d.dismiss() }
+        }, LinearLayout.LayoutParams(0, 52.dp, 1.6f))
+        cuerpo.addView(botones)
+        d.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        d.show()
         campo.requestFocus()
     }
 
     // ---------- Apps y entradas ----------
 
     private fun apps(): View {
-        val scroll = ScrollView(this).apply { tag = tv.apps.size }
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = ScrollView(this).apply { tag = tv.apps.size; isVerticalScrollBarEnabled = false }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, 12.dp) }
         if (tv.entradas.isNotEmpty()) {
+            col.addView(titulo("Entradas").apply { setPadding(2.dp, 4.dp, 0, 12.dp) })
             val chips = LinearLayout(this)
-            fun chip(t: String, accion: () -> Unit) = chips.addView(texto(t, 14f, true).apply {
-                setPadding(16.dp, 10.dp, 16.dp, 10.dp); background = vidrio(20)
-                setOnClickListener { pulso(it); accion() }
-            }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = 10.dp })
-            chip("TV") { tv.abrir("com.webos.app.livetv") }
-            tv.entradas.forEach { e -> chip(e.nombre) { tv.entrada(e.id) } }
+            fun chip(res: Int, t: String, accion: () -> Unit) = chips.addView(LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL; setPadding(14.dp, 0, 18.dp, 0); background = vidrio(22f)
+                addView(icono(res, TEXTO_2), LinearLayout.LayoutParams(18.dp, 18.dp).apply { rightMargin = 8.dp })
+                addView(texto(t, 14f, 600))
+                pulsable(0.95f) { accion() }
+            }, LinearLayout.LayoutParams(-2, 44.dp).apply { rightMargin = 10.dp })
+            chip(R.drawable.ic_tv, "TV") { tv.abrir("com.webos.app.livetv") }
+            tv.entradas.forEach { e -> chip(R.drawable.ic_entrada, e.nombre) { tv.entrada(e.id) } }
             col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chips) })
         }
-        val rejilla = GridLayout(this).apply { columnCount = 4 }
-        val ancho = (resources.displayMetrics.widthPixels - 40.dp) / 4
-        tv.apps.forEach { app ->
-            val celda = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(5.dp, 12.dp, 5.dp, 4.dp)
-                setOnClickListener { pulso(it); tv.abrir(app.id) }
-            }
-            val cara = FrameLayout(this).apply {
-                background = GradientDrawable().apply {
-                    setColor(app.color?.let { runCatching { Color.parseColor(it) }.getOrNull() } ?: 0x22FFFFFF)
-                    cornerRadius = 18.dp.toFloat(); setStroke(1.dp, 0x26FFFFFF)
+        if (tv.apps.isNotEmpty()) {
+            col.addView(titulo("Apps").apply { if (tv.entradas.isEmpty()) setPadding(2.dp, 4.dp, 0, 12.dp) })
+            val rejilla = GridLayout(this).apply { columnCount = 4 }
+            val ancho = anchoUtil / 4
+            tv.apps.forEach { app ->
+                val celda = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                    setPadding(4.dp, 6.dp, 4.dp, 14.dp)
                 }
+                val color = app.color?.let { runCatching { Color.parseColor(it) }.getOrNull() }
+                val cara = FrameLayout(this).apply {
+                    background = GradientDrawable().apply {
+                        setColor(color ?: 0x24FFFFFF); cornerRadius = 18f.dp; setStroke(1.dp, 0x24FFFFFF)
+                    }
+                    clipToOutline = true
+                    if (color != null) elevation = 6f.dp
+                }
+                val inicial = texto(app.nombre.take(1), 26f, 700).apply { gravity = Gravity.CENTER }
+                cara.addView(inicial, FrameLayout.LayoutParams(-1, -1))
+                app.icono?.let { url ->
+                    val img = ImageView(this).apply { setPadding(11.dp, 11.dp, 11.dp, 11.dp) }
+                    cara.addView(img, FrameLayout.LayoutParams(-1, -1))
+                    cargar(url, img) { inicial.visibility = View.GONE }
+                }
+                celda.addView(cara, LinearLayout.LayoutParams(64.dp, 64.dp))
+                celda.addView(texto(app.nombre, 12f, 500, TEXTO_2).apply {
+                    maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(0, 8.dp, 0, 0)
+                }, LinearLayout.LayoutParams(-1, -2))
+                celda.pulsable(0.9f) { tv.abrir(app.id) }
+                rejilla.addView(celda, GridLayout.LayoutParams().apply { width = ancho })
             }
-            val inicial = texto(app.nombre.take(1), 24f, true).apply { gravity = Gravity.CENTER }
-            cara.addView(inicial, FrameLayout.LayoutParams(-1, -1))
-            app.icono?.let { url ->
-                val img = ImageView(this).apply { setPadding(12.dp, 12.dp, 12.dp, 12.dp) }
-                cara.addView(img, FrameLayout.LayoutParams(-1, -1))
-                cargar(url, img) { inicial.visibility = View.GONE }
-            }
-            celda.addView(cara, LinearLayout.LayoutParams(-1, 60.dp))
-            celda.addView(texto(app.nombre, 11f).apply { maxLines = 1; gravity = Gravity.CENTER })
-            rejilla.addView(celda, GridLayout.LayoutParams().apply { width = ancho })
+            col.addView(rejilla)
+        } else {
+            // Sin apps todavía: un aviso centrado en vez de una pantalla vacía
+            val vacio = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, 70.dp, 0, 0) }
+            vacio.addView(icono(R.drawable.ic_tv, TEXTO_3), LinearLayout.LayoutParams(56.dp, 56.dp))
+            vacio.addView(texto(if (tv.estado == TV.Estado.CONECTADA) "Cargando apps…" else "Conecta con la TV para ver sus apps",
+                15f, 500, TEXTO_2).apply { gravity = Gravity.CENTER; setPadding(0, 14.dp, 0, 0) })
+            col.addView(vacio, LinearLayout.LayoutParams(-1, -2))
         }
-        col.addView(rejilla)
-        if (tv.apps.isEmpty()) col.addView(texto(
-            if (tv.estado == TV.Estado.CONECTADA) "Cargando apps…" else "Conecta con la TV para ver sus apps", 14f, color = 0x99FFFFFF.toInt()
-        ).apply { gravity = Gravity.CENTER; setPadding(0, 40.dp, 0, 0) }, LinearLayout.LayoutParams(-1, -2))
         scroll.addView(col)
         return scroll
     }
@@ -310,37 +574,28 @@ class Principal : Activity() {
     // ---------- Fondos ----------
 
     private fun fondos(): View {
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val temas = LinearLayout(this).apply { background = vidrio(18); setPadding(3.dp, 3.dp, 3.dp, 3.dp) }
-        val elegido = prefs.getString("tema", "auto")
-        for ((valor, nombre) in listOf("auto" to "Automático", "claro" to "Claro", "oscuro" to "Oscuro")) {
-            temas.addView(texto(nombre, 13f, true).apply {
-                gravity = Gravity.CENTER
-                if (valor == elegido) background = GradientDrawable().apply { setColor(0x40FFFFFF); cornerRadius = 15.dp.toFloat() }
-                setOnClickListener { pulso(it); prefs.edit().putString("tema", valor).apply(); tv.tema(valor); mostrar(2) }
-            }, LinearLayout.LayoutParams(0, 34.dp, 1f))
-        }
-        col.addView(temas)
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, 12.dp) }
+        col.addView(titulo("Tema").apply { setPadding(2.dp, 4.dp, 0, 12.dp) })
+        val temas = listOf("auto" to "Automático", "claro" to "Claro", "oscuro" to "Oscuro")
+        val elegido = temas.indexOfFirst { it.first == prefs.getString("tema", "auto") }.coerceAtLeast(0)
+        col.addView(segmentos(temas.map { it.second }, elegido, 40) { i ->
+            prefs.edit().putString("tema", temas[i].first).apply(); tv.tema(temas[i].first)
+        }, LinearLayout.LayoutParams(-1, 40.dp))
+
+        tarjetas.clear()
         val actual = prefs.getString("fondo", "")
-        val ancho = (resources.displayMetrics.widthPixels - 52.dp) / 2
+        val separacion = 12.dp
+        val ancho = (anchoUtil - separacion) / 2
         tv.fondos.groupBy { it.grupo }.forEach { (grupo, lista) ->
-            col.addView(texto(grupo, 19f, true).apply { setPadding(0, 22.dp, 0, 8.dp) })
+            col.addView(titulo(grupo))
             val rejilla = GridLayout(this).apply { columnCount = 2 }
-            lista.forEach { f ->
+            lista.forEachIndexed { i, f ->
                 val tarjeta = FrameLayout(this).apply {
                     clipToOutline = true
                     background = GradientDrawable().apply {
-                        cornerRadius = 14.dp.toFloat()
+                        cornerRadius = 16f.dp
                         if (f.colores.size >= 2) { colors = f.colores.map { Color.parseColor(it) }.toIntArray(); orientation = GradientDrawable.Orientation.TL_BR }
                         else setColor(0x14FFFFFF)
-                    }
-                    foreground = GradientDrawable().apply {
-                        cornerRadius = 14.dp.toFloat()
-                        setStroke(if (f.id == actual) 3.dp else 1.dp, if (f.id == actual) Color.WHITE else 0x1FFFFFFF)
-                    }
-                    setOnClickListener {
-                        pulso(it); tv.fondo(f.id)
-                        prefs.edit().putString("fondo", f.id).apply(); ponerFondo(f.id); mostrar(2)
                     }
                 }
                 f.miniatura?.let { url ->
@@ -349,16 +604,42 @@ class Principal : Activity() {
                     cargar(url, img)
                 }
                 tarjeta.addView(View(this).apply {
-                    background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0, 0x99000000.toInt()))
+                    background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0, 0, 0xA6000000.toInt()))
                 }, FrameLayout.LayoutParams(-1, -1))
-                tarjeta.addView(texto(f.nombre, 12f, true), FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM).apply { setMargins(10.dp, 0, 0, 8.dp) })
+                tarjeta.addView(texto(f.nombre, 13f, 600).apply { setShadowLayer(6f, 0f, 1f, 0x80000000.toInt()) },
+                    FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM).apply { setMargins(12.dp, 0, 12.dp, 10.dp) })
+                // El elegido: borde blanco y una marca redonda arriba a la derecha
+                val borde = GradientDrawable().apply { cornerRadius = 16f.dp }
+                tarjeta.foreground = borde
+                val marca = FrameLayout(this).apply {
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) }
+                    addView(icono(R.drawable.ic_check, Color.BLACK), FrameLayout.LayoutParams(16.dp, 16.dp, Gravity.CENTER))
+                }
+                tarjeta.addView(marca, FrameLayout.LayoutParams(26.dp, 26.dp, Gravity.TOP or Gravity.END).apply { setMargins(0, 9.dp, 9.dp, 0) })
+                tarjetas[f.id] = borde to marca
+                tarjeta.pulsable(0.95f) {
+                    tv.fondo(f.id)
+                    prefs.edit().putString("fondo", f.id).apply()
+                    ponerFondo(f.id); marcar(f.id)
+                }
                 rejilla.addView(tarjeta, GridLayout.LayoutParams().apply {
-                    width = ancho; height = ancho * 9 / 16; setMargins(0, 0, 12.dp, 12.dp)
+                    width = ancho; height = ancho * 9 / 16
+                    setMargins(0, 0, if (i % 2 == 0) separacion else 0, separacion)
                 })
             }
             col.addView(rejilla)
         }
-        return ScrollView(this).apply { addView(col) }
+        marcar(actual)
+        return ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(col) }
+    }
+
+    /** Cambia el fondo elegido sin rehacer la lista (así no se pierde por dónde ibas). */
+    private fun marcar(id: String?) {
+        tarjetas.forEach { (fid, par) ->
+            val si = fid == id
+            par.first.setStroke(if (si) 3.dp else 1.dp, if (si) Color.WHITE else 0x1FFFFFFF)
+            par.second.visibility = if (si) View.VISIBLE else View.GONE
+        }
     }
 
     private fun ponerFondo(id: String) {
@@ -381,7 +662,7 @@ class Principal : Activity() {
                 if (destino.tag == url) {
                     destino.alpha = 0f
                     destino.setImageBitmap(bitmap)
-                    destino.animate().alpha(if (destino === fondoImagen) 0.8f else 1f).setDuration(300).start()
+                    destino.animate().alpha(if (destino === fondoImagen) 0.85f else 1f).setDuration(300).start()
                     listo?.invoke()
                 }
             }
@@ -391,39 +672,49 @@ class Principal : Activity() {
     // ---------- Elegir la TV ----------
 
     private fun elegirTV() {
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(22.dp, 8.dp, 22.dp, 0) }
-        val campo = EditText(this).apply {
-            hint = "IP de la TV (p. ej. 192.168.1.50)"
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setText(tv.ip)
+        val cuerpo = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val (marco, campo) = campoTexto("IP de la TV, p. ej. 192.168.1.50", R.drawable.ic_tv)
+        campo.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        campo.setText(tv.ip)
+        cuerpo.addView(marco, LinearLayout.LayoutParams(-1, 56.dp))
+
+        val resultados = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val buscarTexto = texto("Buscar en esta red", 15f, 600, AZUL)
+        val buscar = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setPadding(16.dp, 0, 16.dp, 0); background = vidrio(16f, 0x14, 0x1F)
+            addView(icono(R.drawable.ic_buscar, AZUL), LinearLayout.LayoutParams(20.dp, 20.dp).apply { rightMargin = 12.dp })
+            addView(buscarTexto)
         }
-        col.addView(campo)
-        val encontradas = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val buscar = texto("Buscar en esta red", 15f, true, 0xFF0A84FF.toInt()).apply { setPadding(0, 14.dp, 0, 6.dp) }
-        buscar.setOnClickListener {
-            buscar.text = "Buscando…"
+        buscar.pulsable(0.97f) {
+            buscarTexto.text = "Buscando…"
             tv.buscar { lista ->
-                buscar.text = if (lista.isEmpty()) "No encontré ninguna TV. Buscar otra vez" else "Buscar otra vez"
-                encontradas.removeAllViews()
-                lista.forEach { ip -> encontradas.addView(texto("📺  $ip", 16f).apply {
-                    setPadding(0, 10.dp, 0, 10.dp); setOnClickListener { campo.setText(ip) }
-                }) }
+                buscarTexto.text = if (lista.isEmpty()) "No encontré ninguna TV · buscar otra vez" else "Buscar otra vez"
+                resultados.removeAllViews()
+                lista.forEach { ip ->
+                    resultados.addView(LinearLayout(this).apply {
+                        gravity = Gravity.CENTER_VERTICAL; setPadding(16.dp, 0, 16.dp, 0); background = vidrio(16f, 0x1F, 0x2E)
+                        addView(icono(R.drawable.ic_tv), LinearLayout.LayoutParams(20.dp, 20.dp).apply { rightMargin = 12.dp })
+                        addView(texto(ip, 16f, 500), LinearLayout.LayoutParams(0, -2, 1f))
+                        addView(texto("Usar", 14f, 600, AZUL))
+                        pulsable(0.97f) { campo.setText(ip); campo.setSelection(ip.length) }
+                    }, LinearLayout.LayoutParams(-1, 52.dp).apply { topMargin = 8.dp })
+                }
             }
         }
-        col.addView(buscar)
-        col.addView(encontradas)
-        col.addView(texto("La primera vez la TV pregunta si permites el acceso: acéptalo con el mando.", 12f, color = 0x99FFFFFF.toInt()).apply {
-            setPadding(0, 12.dp, 0, 0)
+        cuerpo.addView(buscar, LinearLayout.LayoutParams(-1, 52.dp).apply { topMargin = 10.dp })
+        cuerpo.addView(resultados)
+        cuerpo.addView(texto("La primera vez la TV pregunta si permites el acceso: acéptalo con el mando.", 13f, 400, TEXTO_3).apply {
+            setPadding(4.dp, 16.dp, 4.dp, 0); setLineSpacing(3f.dp, 1f)
         })
-        val dialogo = AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setTitle("Televisor").setView(col)
-            .setPositiveButton("Conectar") { _, _ ->
-                tv.ip = campo.text.toString().trim()
-                tv.conectar()
-            }
-            .setNegativeButton("Cerrar", null)
-        if (tv.ip.isNotEmpty()) dialogo.setNeutralButton("Olvidar") { _, _ -> tv.olvidar() }
-        dialogo.show()
+
+        val d = hoja("Televisor", cuerpo)
+        cuerpo.addView(boton("Conectar", principal = true) {
+            tv.ip = campo.text.toString().trim()
+            tv.conectar()
+            d.dismiss()
+        }, LinearLayout.LayoutParams(-1, 52.dp).apply { topMargin = 20.dp })
+        if (tv.ip.isNotEmpty()) cuerpo.addView(boton("Olvidar esta TV", color = ROJO) { tv.olvidar(); d.dismiss() },
+            LinearLayout.LayoutParams(-1, 52.dp).apply { topMargin = 10.dp })
+        d.show()
     }
 }
-
