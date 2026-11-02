@@ -47,7 +47,7 @@ var Fondos = (function () {
     { id: 'ciudad-nueva-york', nombre: 'Nueva York', grupo: 'Ciudades', foto: '1514565131-fce0801e5785', profundidad: true },
     { id: 'ciudad-tokio', nombre: 'Tokio de noche', grupo: 'Ciudades', foto: '1540959733332-eab4deabeeaf' },
     { id: 'ciudad-paris', nombre: 'París', grupo: 'Ciudades', foto: '1502602898657-3e91760cbb34' },
-    { id: 'ciudad-san-francisco', nombre: 'San Francisco', grupo: 'Ciudades', foto: '1501594907352-04cda38ebc29', profundidad: true },
+    { id: 'ciudad-san-francisco', nombre: 'San Francisco', grupo: 'Ciudades', foto: '1501594907352-04cda38ebc29' },
     { id: 'ciudad-chicago', nombre: 'Chicago', grupo: 'Ciudades', foto: '1477959858617-67f85cf4f1df' },
     { id: 'ciudad-dubai', nombre: 'Dubái', grupo: 'Ciudades', foto: '1512453979798-5ea266f8880c', profundidad: true },
     { id: 'ciudad-hong-kong', nombre: 'Hong Kong', grupo: 'Ciudades', foto: '1536599018102-9f803c140fc1' },
@@ -131,7 +131,7 @@ var Fondos = (function () {
 
   var foto, borrosos, frente, actual = '', vidrioActual = '';
   var oyentes = { vidrio: null, mitad: null };
-  var animando = false, pendiente = null;
+  var ocupado = false, pendiente = null;   // ocupado desde que se pide la foto hasta que acaba la transición
 
   function iniciar() {
     foto = document.getElementById('foto');
@@ -154,8 +154,11 @@ var Fondos = (function () {
    */
   function aplicar(f, opciones) {
     var pedido = f.id + ':' + opciones.tema + ':' + opciones.frente;
-    if (pedido === actual && !animando) return Promise.resolve();
-    if (animando) { pendiente = [f, opciones]; return Promise.resolve(); }
+    // El cerrojo se pone ANTES de cargar la foto: si llegan dos pulsaciones mientras se decodifica,
+    // la segunda espera su turno en vez de lanzar otra transición encima
+    if (ocupado) { pendiente = [f, opciones]; return Promise.resolve(); }
+    if (pedido === actual) return Promise.resolve();
+    ocupado = true;
     actual = pedido;
     var body = document.body;
     return css(f, opciones.tema, opciones.frente).then(function (v) {
@@ -168,9 +171,9 @@ var Fondos = (function () {
         body.classList.toggle('foto', !f.minimal);
         ponerVidrio(v.vidrio);
         if (oyentes.mitad) oyentes.mitad(f);
+        siguientePendiente();
         return;
       }
-      animando = true;
       var a = borrosos[0], b = borrosos[1];
       // 1. La foto actual se funde con su copia difuminada; el recorte y el vidrio de los paneles se apagan
       a.style.backgroundImage = vidrioActual;
@@ -203,13 +206,18 @@ var Fondos = (function () {
         return despues(900);
       }).then(function () {
         a.style.backgroundImage = b.style.backgroundImage = 'none';   // libera las texturas
-        animando = false;
-        if (pendiente) { var p = pendiente; pendiente = null; aplicar(p[0], p[1]); }
+        siguientePendiente();
       });
     }).catch(function (e) {
-      animando = false;
+      actual = '';
+      siguientePendiente();
       console.warn('Fondo no disponible', e);   // sin red y sin la foto en el paquete: se queda el que hubiera
     });
+  }
+
+  function siguientePendiente() {
+    ocupado = false;
+    if (pendiente) { var p = pendiente; pendiente = null; aplicar(p[0], p[1]); }
   }
 
   /**

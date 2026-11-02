@@ -51,14 +51,24 @@ var Luna = (function () {
     { id: 'youtube.leanback.v4', title: 'YouTube', bgColor: '#e62117' },
     { id: 'amazon', title: 'Prime Video', bgColor: '#00a8e1' },
     { id: 'com.disney.disneyplus-prod', title: 'Disney+', bgColor: '#0b1a4b' },
-    { id: 'spotify-beehive', title: 'Spotify', bgColor: '#1db954' }
+    { id: 'spotify-beehive', title: 'Spotify', bgColor: '#1db954' },
+    { id: 'com.apple.appletv', title: 'Apple TV', bgColor: '#1c1c1e' },
+    { id: 'cdp-30', title: 'Plex', bgColor: '#1f1f1f' }
   ];
 
   /** Apps instaladas: [{id, title, icon, largeIcon, bgColor}] */
   function apps() {
     if (!enTV) return Promise.resolve(EJEMPLO);
+    // 1.º Luna; 2.º SSAP local (ver ssap.js); 3.º la lista de apps conocidas
     return llamar('luna://com.webos.applicationManager/listLaunchPoints', {})
-      .then(function (r) { return r.launchPoints && r.launchPoints.length ? r.launchPoints : CONOCIDAS; })
+      .then(function (r) {
+        if (!r.launchPoints || !r.launchPoints.length) throw new Error('Lista vacía');
+        return r.launchPoints;
+      })
+      .catch(function () {
+        if (typeof Ssap === 'undefined') throw new Error('Sin SSAP');
+        return Ssap.apps().then(function (l) { if (!l.length) throw new Error('Lista vacía'); return l; });
+      })
       .catch(function () { return CONOCIDAS; });
   }
 

@@ -4,6 +4,7 @@
     python3 tools/install.py 192.168.1.50                # empaqueta, instala o actualiza, y la abre
     python3 tools/install.py 192.168.1.50 --desinstalar  # la quita
     python3 tools/install.py 192.168.1.50 --olvidar      # borra la clave y la huella guardadas de esa TV
+    python3 tools/install.py 192.168.1.50 --rapido       # solo sube HTML, CSS y JS (para probar cambios)
 
 Antes, en la TV: instala "Developer Mode" desde LG Content Store, entra con una cuenta gratuita de
 webostv.developer.lge.com, activa "Dev Mode Status" (la TV se reinicia) y luego "Key Server".
@@ -173,6 +174,36 @@ def instalar(ip, clave):
           ' (Acceso rápido) y elige guardarla ahí.')
 
 
+def rapido(ip, clave):
+    """Copia solo index.html, css/, js/ e img/ (~60 KB) sobre la app ya instalada y la relanza.
+
+    Sin fotos ni instalador: cada prueba tarda un segundo en vez de quince y no reescribe 15 MB
+    en la memoria de la TV. Requiere haberla instalado antes de forma normal.
+    """
+    import io
+    import tarfile
+    with open(os.path.join(build.APP, 'appinfo.json'), encoding='utf-8') as f:
+        app_id = json.load(f)['id']
+    destino = '/media/developer/apps/usr/palm/applications/' + app_id
+    datos = io.BytesIO()
+    with tarfile.open(fileobj=datos, mode='w') as tar:
+        for nombre in ('index.html', 'appinfo.json', 'css', 'js', 'img'):
+            ruta = os.path.join(build.APP, nombre)
+            if os.path.exists(ruta):
+                tar.add(ruta, arcname=nombre)
+    print('Subiendo %d KB a %s ...' % (len(datos.getvalue()) // 1024, destino))
+    r = ssh(ip, clave, 'test -w %s && tar -x -C %s' % (destino, destino), entrada=datos.getvalue())
+    if r.returncode != 0:
+        sys.exit('No se pudo escribir en la app instalada (%s).\n'
+                 'Instálala primero sin --rapido; si ya lo está, este firmware no deja escribir ahí.' %
+                 (r.stderr.decode(errors='replace').strip() or 'sin permiso'))
+    luna(ip, clave, 'luna://com.webos.applicationManager/closeByAppId', {'id': app_id}, espera=10,
+         fin=lambda x: 'returnValue' in x)
+    luna(ip, clave, 'luna://com.webos.applicationManager/launch', {'id': app_id}, espera=10,
+         fin=lambda x: 'returnValue' in x)
+    print('Actualizada y relanzada.')
+
+
 def desinstalar(ip, clave):
     with open(os.path.join(build.APP, 'appinfo.json'), encoding='utf-8') as f:
         app_id = json.load(f)['id']
@@ -201,6 +232,8 @@ def main():
     inicio = time.time()
     if '--desinstalar' in sys.argv:
         desinstalar(ip, clave)
+    elif '--rapido' in sys.argv:
+        rapido(ip, clave)
     else:
         instalar(ip, clave)
     print('(%.0f s)' % (time.time() - inicio))

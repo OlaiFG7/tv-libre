@@ -274,6 +274,7 @@
 
   function abrirCajon() {
     panel = 'cajon';
+    body.classList.add('con-panel');
     var dentro = document.createElement('div');
     dentro.className = 'rejilla-dentro';
     apps.forEach(function (a) { dentro.appendChild(tarjetaApp(a)); });
@@ -290,6 +291,7 @@
 
   function cerrarCajon() {
     panel = null;
+    body.classList.remove('con-panel');
     $('cajon').classList.remove('abierto');
     // Se vacía al terminar la animación: menos nodos y menos memoria mientras no se ve
     setTimeout(function () { if (panel !== 'cajon') { $('rejilla').innerHTML = ''; rejilla = []; } }, 450);
@@ -439,8 +441,14 @@
     relleno.style.backgroundPosition = (-p.x) + 'px ' + (-p.y) + 'px';
   }
 
+  // reloj() la llama cada minuto, pero la fecha cambia una vez al día y el tiempo cada 30 min:
+  // solo se formatea y se toca el DOM si algo cambió
+  var ultimaFecha = '';
   function pintarFecha() {
     var d = new Date();
+    var clave = d.toDateString() + (tiempo ? ':' + tiempo.codigo + ':' + Math.round(tiempo.temp) + ':' + tiempo.ciudad : '');
+    if (clave === ultimaFecha) return;
+    ultimaFecha = clave;
     var texto = escapar(d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }));
     if (tiempo) {
       texto += '<span class="clima">' + Tiempo.icono(tiempo.codigo) + Math.round(tiempo.temp) + '° ' + escapar(tiempo.ciudad) + '</span>';
@@ -522,14 +530,15 @@
         cambiar: function (p) { prefs.tema = rotar(OPCIONES_TEMA, prefs.tema, p); aplicarTema(true); } },
       { nombre: 'Fondo', valor: function () { var f = Fondos.buscar(prefs.fondo); return '<small>' + f.grupo + '</small>' + f.nombre; },
         cambiar: function (p) { prefs.fondo = Fondos.siguiente(prefs.fondo, p).id; aplicarFondo(); programarRotacion(); } },
-      { nombre: 'Cambiar de fondo', valor: function () { return etiqueta(OPCIONES_ROTAR, prefs.rotar); },
+      { nombre: 'Cambiar de fondo', repintar: true, valor: function () { return etiqueta(OPCIONES_ROTAR, prefs.rotar); },
         cambiar: function (p) { prefs.rotar = rotar(OPCIONES_ROTAR, prefs.rotar, p); programarRotacion(); } },
-      { nombre: 'Rotar entre', valor: function () { return etiqueta(OPCIONES_ROTAR_EN, prefs.rotarEn); },
+      // Las filas que no tienen efecto con la opción de arriba se ocultan (ver filter al final)
+      { nombre: 'Rotar entre', si: function () { return prefs.rotar > 0; }, valor: function () { return etiqueta(OPCIONES_ROTAR_EN, prefs.rotarEn); },
         cambiar: function (p) { prefs.rotarEn = rotar(OPCIONES_ROTAR_EN, prefs.rotarEn, p); } },
       { grupo: 'Pantalla de inicio' },
-      { nombre: 'Reloj', valor: function () { return etiqueta(OPCIONES_RELOJ, prefs.reloj); },
+      { nombre: 'Reloj', repintar: true, valor: function () { return etiqueta(OPCIONES_RELOJ, prefs.reloj); },
         cambiar: function (p) { prefs.reloj = rotar(OPCIONES_RELOJ, prefs.reloj, p); aplicarVidrio(); aplicarFondo(false); pintarRelleno(); } },
-      { nombre: 'Profundidad', valor: function () { return prefs.profundidad ? 'Sí' : 'No'; },
+      { nombre: 'Profundidad', si: function () { return prefs.reloj !== 'oculto'; }, valor: function () { return prefs.profundidad ? 'Sí' : 'No'; },
         cambiar: function () { prefs.profundidad = !prefs.profundidad; aplicarVidrio(); aplicarFondo(false); } },
       { nombre: 'Fecha y tiempo', valor: function () { return prefs.fecha ? 'Sí' : 'No'; },
         cambiar: function () { prefs.fecha = !prefs.fecha; aplicarVidrio(); } },
@@ -563,12 +572,20 @@
           aviso('Dock restablecido');
         } }
     );
-    return lista;
+    return lista.filter(function (a) { return !a.si || a.si(); });
   }
   var AJUSTES = [], ELEGIBLES = [];
 
+  // Tras cambiar un ajuste: si muestra u oculta otras filas se repinta la lista; si no, solo esa fila
+  function trasCambiar(a) {
+    guardar();
+    if (a.repintar) pintarAjustes();
+    else if (AJUSTES.indexOf(a) >= 0 && a.el.parentNode) refrescarAjuste(a);
+  }
+
   function abrirAjustes() {
     panel = 'ajustes';
+    body.classList.add('con-panel', 'panel-ajustes');
     ajusteFoco = 0;
     resultados = null;
     pintarAjustes();
@@ -582,6 +599,7 @@
     if (input) input.blur();
     guardar();
     panel = null;
+    body.classList.remove('con-panel', 'panel-ajustes');
     $('ajustes').classList.remove('abierto');
     mostrarPie();
   }
@@ -682,9 +700,9 @@
     else if (k === TECLAS.ABAJO) enfocarAjuste(ajusteFoco + 1);
     else if (k === TECLAS.OK) {
       if (a.tipo === 'texto') { input.value = ''; input.focus(); return true; }
-      if (a.cambiar) { a.cambiar(1); guardar(); if (AJUSTES.indexOf(a) >= 0 && a.el.parentNode) refrescarAjuste(a); }
+      if (a.cambiar) { a.cambiar(1); trasCambiar(a); }
     } else if ((k === TECLAS.IZQ || k === TECLAS.DER) && a.cambiar && !a.resultado) {
-      a.cambiar(k === TECLAS.IZQ ? -1 : 1); guardar(); refrescarAjuste(a);
+      a.cambiar(k === TECLAS.IZQ ? -1 : 1); trasCambiar(a);
     } else if (k === TECLAS.VERDE) { alternarTema(); refrescarTodos(); }
     else if (k === TECLAS.ROJO) { siguienteFondo(); refrescarTodos(); }
     return true;
@@ -781,8 +799,31 @@
   });
   window.addEventListener('blur', okReiniciar);
 
-  // Al volver a la app (p. ej. tras instalar otra), recarga la lista
-  document.addEventListener('webOSRelaunch', function () {
+  // ---------- Órdenes desde el móvil ----------
+  // La app del móvil abre TV Libre con parámetros (ssap://system.launcher/launch con params):
+  // {fondo: id} cambia el fondo, {tema: 'claro'|'oscuro'|'auto'}, {siguiente: true} pasa al siguiente.
+  function parametros() {
+    var sistema = window.webOSSystem || window.PalmSystem;
+    var p = sistema && sistema.launchParams;
+    try { p = typeof p === 'string' ? JSON.parse(p || '{}') : p || {}; } catch (e) { p = {}; }
+    return p;
+  }
+
+  function atenderParametros(p) {
+    if (p.fondo && Fondos.buscar(p.fondo).id === p.fondo) {
+      prefs.fondo = p.fondo; guardar(); aplicarFondo(); programarRotacion();
+      aviso(Fondos.buscar(p.fondo).nombre, 'imagen');
+    } else if (p.siguiente) {
+      siguienteFondo();
+    }
+    if (p.tema === 'claro' || p.tema === 'oscuro' || p.tema === 'auto') {
+      prefs.tema = p.tema; guardar(); aplicarTema(true);
+    }
+  }
+
+  // Al volver a la app (desde el móvil, o tras instalar otra), atiende los parámetros y recarga la lista
+  document.addEventListener('webOSRelaunch', function (e) {
+    atenderParametros((e && e.detail) || parametros());
     if (panel === 'cajon') cerrarCajon();
     cargarApps().then(function () { pintarApps(); enfocar(fila, col); });
   });
@@ -825,6 +866,7 @@
   actualizarTiempo();
   programarRotacion();
   mostrarPie();
+  atenderParametros(parametros());
   // Las fuentes pueden llegar después del primer pintado y cambiar el ancho del reloj
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(alinearRelleno);
 })();

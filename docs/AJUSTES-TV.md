@@ -19,7 +19,7 @@ Todo empieza en **⚙ → Todos los ajustes**.
 
 | Qué | Dónde | Recomendación |
 |---|---|---|
-| Encender TV con móvil | Conexión → Ajustes de conexión de dispositivos | Desactivar si no envías contenido desde el móvil |
+| Encender TV con móvil | Conexión → Ajustes de conexión de dispositivos | **Activado si usas la app móvil de TV Libre** (la enciende con Wake-on-LAN); si no, desactivar |
 | SIMPLINK (HDMI-CEC) | Conexión → Ajustes de conexión HDMI | Desactivar si no controlas otros aparatos con el mando |
 | QuickStart+ | General → Ajustes adicionales | Desactivado = cada encendido es un arranque limpio |
 
@@ -29,6 +29,7 @@ Si dejas QuickStart+ activado, haz un **reinicio completo** de vez en cuando: de
 
 - Modo de imagen: **Cine** o **Experto**.
 - Ahorro de energía: **Desactivado**.
+- Relación de aspecto → **Solo escaneo: Activado**. Sin él la TV recorta un poco los bordes y reescala; con él, la imagen de 1080p (y TV Libre) pasa a 4K exactamente al doble, píxel a píxel.
 - Contraste dinámico, Color dinámico y Motion Eye Care: desactívalos si la imagen te parece artificial.
 
 ## 4. Bloqueo por DNS

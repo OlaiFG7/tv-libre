@@ -57,7 +57,8 @@ body {
 }
 
 /* Al cambiar de tema, los colores se funden. Solo durante el cambio, para no cargar el resto de transiciones. */
-body.cambiando-tema .vidrio,
+/* Los paneles (Ajustes, Todas las apps) se excluyen: si no, esta regla pisaría su transición de abrir y cerrar */
+body.cambiando-tema .vidrio:not(.ajustes):not(.cajon),
 body.cambiando-tema .fecha,
 body.cambiando-tema .ajuste,
 body.cambiando-tema .pie span {
@@ -88,6 +89,15 @@ body.sin-animaciones *, body.sin-animaciones *::before, body.sin-animaciones *::
 .borroso { z-index: 1; opacity: 0; transition: opacity 0.5s ease-in-out; will-change: opacity; }
 .frente { z-index: 4; opacity: 0; pointer-events: none; }
 body.sin-profundidad .frente { display: none; }
+/* Ruido casi invisible sobre los degradados minimalistas: evita los escalones de color (banding) en paneles IPS */
+#foto::after {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; right: 0; bottom: 0;
+  background: url(../img/ruido.png);
+  opacity: 0.025;
+}
+body.foto #foto::after { display: none; }
 
 /* Viñeta para que el reloj y los textos se lean sobre cualquier foto */
 .velo {
@@ -110,7 +120,7 @@ body.foto .velo { opacity: 1; }
   isolation: isolate;
   background-color: var(--tinte);
   box-shadow:
-    inset 0 1.5px 0 var(--brillo),          /* canto de luz arriba */
+    inset 0 2px 0 var(--brillo),            /* canto de luz arriba; píxeles enteros: la TV escala ×2 a 4K */
     inset 0 -1px 0 rgba(255, 255, 255, 0.1),
     inset 0 0 0 1px var(--canto),           /* borde fino */
     0 24px 60px var(--sombra);
@@ -188,7 +198,7 @@ body.sin-fecha .fecha { visibility: hidden; }
 }
 body.transicion .reloj .relleno { opacity: 0.35; }
 .reloj .borde, .reloj .reflejo { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
-.reloj .borde { color: rgba(255, 255, 255, 0.08); -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.62); }
+.reloj .borde { color: rgba(255, 255, 255, 0.08); -webkit-text-stroke: 2px rgba(255, 255, 255, 0.55); }
 .reloj .reflejo {
   color: transparent;
   -webkit-background-clip: text;
@@ -271,7 +281,7 @@ body.editando .aviso-edicion { opacity: 1; transform: none; }
   font-size: 72px;
   font-weight: 700;
   color: #fff;
-  box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.24), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 .app .cara img { width: 112px; height: 112px; object-fit: contain; }
 /* Brillo especular encima del icono: se intensifica al enfocar, como en tvOS */
@@ -318,11 +328,14 @@ body.claro .app.mas .cara { background-color: rgba(255, 255, 255, 0.45); }
 /* Caja de vidrio con las entradas, debajo del dock */
 .entradas {
   position: absolute;
-  left: 72px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: max-content;   /* centrada sin transform: offsetLeft sigue siendo la posición real para el vidrio */
   top: 876px;
   z-index: 5;
   display: flex;
-  padding: 14px;
+  padding: 14px 22px;   /* sitio para que la cápsula enfocada crezca sin que la corte el borde redondo */
   border-radius: 52px;
 }
 .chip {
@@ -353,7 +366,7 @@ body.foto:not(.claro) .chip { color: #fff; }
   transition: opacity 0.25s;
 }
 .chip:last-child { margin-right: 0; }
-.chip.foco { transform: scale(1.1); color: var(--foco-texto) !important; }
+.chip.foco { transform: scale(1.07); color: var(--foco-texto) !important; }
 .chip.foco::after { opacity: 1; }
 
 /* ---------- Botón de ajustes (arriba a la derecha) ---------- */
@@ -370,7 +383,7 @@ body.foto:not(.claro) .chip { color: #fff; }
   align-items: center;
   justify-content: center;
   color: var(--texto);
-  transition: transform 0.35s var(--muelle);
+  transition: transform 0.35s var(--muelle), opacity 0.5s var(--suave);
 }
 body.foto:not(.claro) .boton-ajustes { color: #fff; }
 .boton-ajustes svg { width: 40px; height: 40px; position: relative; }
@@ -388,6 +401,9 @@ body.foto:not(.claro) .boton-ajustes { color: #fff; }
 .boton-ajustes.foco::after { opacity: 1; }
 body.entrada .boton-ajustes { opacity: 0; }
 body.editando .boton-ajustes { opacity: 0.3; }
+/* Con un panel abierto, el foco blanco no debe transparentarse a través del vidrio de Ajustes */
+body.con-panel .boton-ajustes.foco { transform: none; color: var(--texto) !important; }
+body.con-panel .boton-ajustes.foco::after { opacity: 0; }
 
 /* ---------- Pie ---------- */
 
@@ -440,7 +456,7 @@ body.foto .pie span { color: rgba(255, 255, 255, 0.75); }
 .rejilla .app:nth-child(6n) { margin-right: 0; }
 .rejilla .app .cara img { width: 84px; height: 84px; }
 .rejilla .app .cara { font-size: 54px; border-radius: 22px; }
-.rejilla .app .nombre { top: 136px; font-size: 22px; }
+.rejilla .app .nombre { top: 136px; font-size: 22px; opacity: 0.65; transform: none; }   /* en la rejilla, siempre visibles */
 .rejilla .app.foco { transform: scale(1.12); }
 .rejilla .app.foco .nombre { transform: translateY(4px) scale(0.893); }
 
@@ -493,6 +509,7 @@ body.foto .pie span { color: rgba(255, 255, 255, 0.75); }
 .aviso {
   position: absolute;
   right: 168px;   /* a la izquierda del botón de ajustes */
+  transition: opacity 0.3s, transform 0.5s var(--muelle), right 0s;
   top: 54px;
   z-index: 20;
   display: flex;
@@ -508,6 +525,8 @@ body.foto .pie span { color: rgba(255, 255, 255, 0.75); }
   transition: opacity 0.3s, transform 0.5s var(--muelle);
 }
 .aviso.visible { opacity: 1; transform: none; }
+/* Con Ajustes abierto (ocupa la derecha), el aviso sale a la izquierda del panel, sobre el fondo */
+body.panel-ajustes .aviso { right: 876px; }
 .aviso svg { width: 34px; height: 34px; margin-right: 12px; }
 .aviso.visible svg { animation: girar 0.6s var(--muelle); }
 @keyframes girar { from { transform: rotate(-90deg) scale(0.5); } to { transform: none; } }

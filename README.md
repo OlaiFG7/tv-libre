@@ -7,7 +7,7 @@ Pensada para la LG **UN711C0ZB** (webOS 5.0, firmware 04.64.00). Debería funcio
 - **Vidrio líquido.** El dock, los ajustes, los avisos y hasta las cifras del reloj son vidrio translúcido que difumina el fondo, con canto de luz y reflejo especular.
 - **Fondos a elegir.** 5 minimalistas (Grafito, Aurora, Océano, Atardecer, Salvia) y 33 fotos: montañas, playas, ciudades, lagos y naturaleza. Van dentro del paquete y funcionan sin red.
 - **Rotación con transición difuminada.** El fondo cambia solo cada 1, 5, 15 o 60 minutos (o nunca), por todas las fotos o dentro de un grupo. La foto se difumina, cambia mientras está borrosa y la nueva se enfoca asentándose, como en Apple TV.
-- **Reloj con profundidad.** En 11 fotos, las cumbres o los edificios tapan parte del reloj, como en la pantalla de bloqueo del iPhone.
+- **Reloj con profundidad.** En 10 fotos, las cumbres o los edificios tapan parte del reloj, como en la pantalla de bloqueo del iPhone.
 - **Personalizable.** Reloj de vidrio, fino u oculto; fecha y tiempo sí o no; profundidad sí o no.
 - **Claro u oscuro con un botón.** El verde del mando cambia el tema con una transición suave.
 - **Fluida.** Solo se animan transform y opacity, y la repetición de teclas se limita para que no se acumule lag. No corre nada en segundo plano.
@@ -50,6 +50,8 @@ Para que la TV no te lleve al inicio de LG al encenderla: *Ajustes → General �
 
 Si notas la TV lenta, en Ajustes pon **Vidrio: Sencillo** y **Animaciones: Reducidas** (el fondo cambia sin transición).
 
+Si el firmware no deja a TV Libre leer la lista de apps, lo intenta por el protocolo de la propia TV (SSAP): la primera vez la TV pregunta si permites el acceso; acepta y no vuelve a preguntar.
+
 Al principio se ocultan las apps de sistema de LG (Content Store, Guía, Galería…). Con el botón amarillo puedes volver a mostrarlas.
 
 ### Mantenimiento
@@ -58,6 +60,10 @@ Al principio se ocultan las apps de sistema de LG (Content Store, Guía, Galerí
 - Desinstalar:
   ```bash
   python3 tools/install.py 192.168.1.50 --desinstalar
+  ```
+- Para probar cambios de HTML, CSS o JS sin volver a subir las fotos (un segundo en vez de quince):
+  ```bash
+  python3 tools/install.py 192.168.1.50 --rapido
   ```
 - Si reinstalas Developer Mode, la huella SSH de la TV cambia y el instalador se detiene. Olvida la antigua y vuelve a emparejar:
   ```bash
@@ -92,7 +98,7 @@ Si prefieres las herramientas oficiales de LG, también funciona:
 ```bash
 npm install -g @webos-tools/cli
 ares-setup-device   # añade la TV
-ares-package app && ares-install com.tvlibre.inicio_0.3.0_all.ipk
+ares-package app && ares-install com.tvlibre.inicio_0.3.1_all.ipk
 ```
 
 ## Compatibilidad
